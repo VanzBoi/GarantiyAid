@@ -50,6 +50,9 @@ model Beneficiary {
   transactions  Transaction[]
   notifications Notification[]
   documents     BeneficiaryDocument[]
+  biometricConsents BiometricConsent[]
+  biometricProfile  BiometricProfile?
+  assistantMessages AssistantMessage[]
 
   @@index([barangayId])
   @@map("beneficiaries")
@@ -163,6 +166,7 @@ model Claim {
 
 model WalletAccount {
   walletId          String        @id @default(uuid()) @map("wallet_id") @db.Uuid
+  walletNumber      String        @unique @map("wallet_number") @db.VarChar(16)
   beneficiaryId     String        @unique @map("beneficiary_id") @db.Uuid
   balance           Decimal       @default(0) @db.Decimal(12, 2)
   currency          String        @default("PHP") @db.Char(3)
@@ -171,21 +175,25 @@ model WalletAccount {
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   beneficiary       Beneficiary   @relation(fields: [beneficiaryId], references: [beneficiaryId], onDelete: Cascade)
   transactions      Transaction[]
+  counterpartyTransactions Transaction[] @relation("TransactionCounterparty")
 
   @@map("wallet_accounts")
 }
 
 model Transaction {
   transactionId   String        @id @default(uuid()) @map("transaction_id") @db.Uuid
-  claimId         String        @unique @map("claim_id") @db.Uuid
+  claimId         String?       @unique @map("claim_id") @db.Uuid
   walletId        String        @map("wallet_id") @db.Uuid
   beneficiaryId   String        @map("beneficiary_id") @db.Uuid
   amount          Decimal       @db.Decimal(12, 2)
   transactionType String        @map("transaction_type") @db.VarChar(32)
   referenceNo     String        @unique @map("reference_no") @db.VarChar(64)
   status          String        @default("posted") @db.VarChar(32)
+  counterpartyWalletId String?  @map("counterparty_wallet_id") @db.Uuid
+  note            String?       @db.VarChar(160)
   createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  claim           Claim         @relation(fields: [claimId], references: [claimId])
+  claim           Claim?        @relation(fields: [claimId], references: [claimId])
+  counterpartyWallet WalletAccount? @relation("TransactionCounterparty", fields: [counterpartyWalletId], references: [walletId], onDelete: SetNull)
   wallet          WalletAccount @relation(fields: [walletId], references: [walletId], onDelete: Cascade)
   beneficiary     Beneficiary   @relation(fields: [beneficiaryId], references: [beneficiaryId], onDelete: Cascade)
 
@@ -259,4 +267,48 @@ model AuthSession {
 
   @@index([beneficiaryId, expiresAt])
   @@map("auth_sessions")
+}
+
+model BiometricConsent {
+  consentId      String      @id @default(uuid()) @map("consent_id") @db.Uuid
+  beneficiaryId  String      @map("beneficiary_id") @db.Uuid
+  version        String      @db.VarChar(16)
+  status         String      @default("active") @db.VarChar(16)
+  consentedAt    DateTime    @default(now()) @map("consented_at") @db.Timestamptz(6)
+  revokedAt      DateTime?   @map("revoked_at") @db.Timestamptz(6)
+  retentionUntil DateTime    @map("retention_until") @db.Timestamptz(6)
+  beneficiary    Beneficiary @relation(fields: [beneficiaryId], references: [beneficiaryId], onDelete: Cascade)
+  profiles       BiometricProfile[]
+
+  @@index([beneficiaryId, status])
+  @@map("biometric_consents")
+}
+
+model BiometricProfile {
+  profileId           String           @id @default(uuid()) @map("profile_id") @db.Uuid
+  beneficiaryId       String           @unique @map("beneficiary_id") @db.Uuid
+  consentId           String           @map("consent_id") @db.Uuid
+  status              String           @default("enrolled") @db.VarChar(32)
+  simulated           Boolean          @default(true)
+  processorCompatible Boolean          @default(true) @map("processor_compatible")
+  templateHash        String           @map("template_hash") @db.Char(64)
+  livenessPassed      Boolean          @default(false) @map("liveness_passed")
+  enrolledAt          DateTime         @default(now()) @map("enrolled_at") @db.Timestamptz(6)
+  lastVerifiedAt      DateTime?        @map("last_verified_at") @db.Timestamptz(6)
+  beneficiary         Beneficiary      @relation(fields: [beneficiaryId], references: [beneficiaryId], onDelete: Cascade)
+  consent             BiometricConsent @relation(fields: [consentId], references: [consentId], onDelete: Cascade)
+
+  @@map("biometric_profiles")
+}
+
+model AssistantMessage {
+  messageId     String      @id @default(uuid()) @map("message_id") @db.Uuid
+  beneficiaryId String      @map("beneficiary_id") @db.Uuid
+  role          String      @db.VarChar(16)
+  text          String      @db.Text
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  beneficiary   Beneficiary @relation(fields: [beneficiaryId], references: [beneficiaryId], onDelete: Cascade)
+
+  @@index([beneficiaryId, createdAt])
+  @@map("assistant_messages")
 }

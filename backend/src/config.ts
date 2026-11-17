@@ -16,7 +16,21 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const authPepper = required("AUTH_PEPPER");
 if (authPepper.length < 32) throw new Error("AUTH_PEPPER must contain at least 32 characters.");
 
+const faceMode = process.env.FACE_PROCESSOR_MODE ?? 'SIMULATED';
+if (!['SIMULATED', 'REMOTE'].includes(faceMode)) throw new Error('Invalid FACE_PROCESSOR_MODE.');
+const faceRemote = faceMode === 'REMOTE' ? {
+  url: required('FACE_PROCESSOR_URL'), secret: required('FACE_PROCESSOR_SECRET'), version: required('FACE_PROCESSOR_VERSION'),
+} : null;
+if (faceRemote) {
+  const url = new URL(faceRemote.url);
+  if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
+    throw new Error('FACE_PROCESSOR_URL must use HTTPS, or HTTP on loopback.');
+  }
+}
+
 export const config = {
+  faceMode,
+  faceRemote,
   nodeEnv: process.env.NODE_ENV ?? "development",
   port,
   databaseUrl: required("DATABASE_URL"),

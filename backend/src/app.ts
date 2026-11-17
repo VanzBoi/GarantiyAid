@@ -4,7 +4,8 @@ import { mkdir, open, unlink } from "node:fs/promises";
 import { config } from "./config.ts";
 import { prisma } from "./db.ts";
 import { ApiError } from "./errors.ts";
-import { createOtp, createQrToken, createSessionToken, hashSecret, secretMatches } from "./security.ts";
+import { createOtp, createQrToken, createSessionToken, hashSecret, secretMatches, walletNumberFor } from "./security.ts";
+import { registerExtendedRoutes } from "./extended.ts";
 import { parseOtpRequest, parseOtpVerification, parseProfileUpdate, parseRegistration, uuid } from "./validation.ts";
 import { DOCUMENT_MIME_TYPES, MAX_DOCUMENT_BYTES, documentStoragePath, parseDocumentUpload } from "./documents.ts";
 
@@ -15,14 +16,17 @@ const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 export const app = express();
 
 app.disable("x-powered-by");
-app.use(express.json({ limit: "32kb" }));
+const smallJson = express.json({ limit: "32kb" });
+// Face capture sends a few compressed camera frames; they are hashed and discarded, never stored.
+const faceJson = express.json({ limit: "8mb" });
+app.use((req, res, next) => (req.path.startsWith("/beneficiaries/me/biometrics/") ? faceJson : smallJson)(req, res, next));
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && config.corsOrigins.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-File-Name, X-Document-Type");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
   }
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
@@ -38,6 +42,8 @@ function publicBeneficiary(beneficiary: {
   address: string;
   barangayId: string;
   contactNumber: string;
+  email?: string | null;
+  passwordHash?: string | null;
   isVerified: boolean;
   status: string;
 }) {
@@ -51,12 +57,19 @@ function publicBeneficiary(beneficiary: {
     address: beneficiary.address,
     barangayId: beneficiary.barangayId,
     contactNumber: beneficiary.contactNumber,
+    email: beneficiary.email ?? null,
+    hasPassword: !!beneficiary.passwordHash,
     isVerified: beneficiary.isVerified,
     status: beneficiary.status,
   };
 }
 
-async function issueOtp(beneficiaryId: string, purpose: "register" | "login") {
+export type OtpPurpose = "register" | "login" | "reset" | "email";
+
+// `binding` ties a code to a value (for example the email address being verified).
+const otpSecret = (code: string, binding?: string) => (binding ? `${binding}:${code}` : code);
+
+async function issueOtp(beneficiaryId: string, purpose: OtpPurpose, binding?: string) {
   const recent = await prisma.otpChallenge.findFirst({
     where: {
       beneficiaryId,
@@ -78,7 +91,7 @@ async function issueOtp(beneficiaryId: string, purpose: "register" | "login") {
       data: {
         beneficiaryId,
         purpose,
-        codeHash: hashSecret(code, "otp", config.authPepper),
+        codeHash: hashSecret(otpSecret(code, binding), "otp", config.authPepper),
         expiresAt: new Date(Date.now() + OTP_LIFETIME_MS),
       },
     }),
@@ -102,6 +115,41 @@ async function requireBeneficiary(req: Request) {
     throw new ApiError(401, "SESSION_EXPIRED", "Your session has expired. Please sign in again.");
   }
   return { session, beneficiary: session.beneficiary };
+}
+
+/** Checks the latest unconsumed code for a purpose and consumes it on success. */
+async function consumeOtp(beneficiaryId: string, purpose: OtpPurpose, code: string, binding?: string) {
+  const challenge = await prisma.otpChallenge.findFirst({
+    where: { beneficiaryId, purpose, consumedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!challenge || challenge.expiresAt <= new Date()) {
+    throw new ApiError(400, "OTP_EXPIRED", "This code has expired. Request a new one.");
+  }
+  if (challenge.attemptsRemaining <= 0) {
+    throw new ApiError(429, "OTP_ATTEMPTS_EXCEEDED", "Request a new code and try again.");
+  }
+  if (!secretMatches(otpSecret(code, binding), challenge.codeHash, "otp", config.authPepper)) {
+    await prisma.otpChallenge.update({
+      where: { challengeId: challenge.challengeId },
+      data: { attemptsRemaining: { decrement: 1 } },
+    });
+    throw new ApiError(400, "OTP_INCORRECT", "The verification code is incorrect.");
+  }
+  const consumed = await prisma.otpChallenge.updateMany({
+    where: { challengeId: challenge.challengeId, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+  if (!consumed.count) throw new ApiError(400, "OTP_EXPIRED", "This code has expired. Request a new one.");
+}
+
+async function createSession(beneficiaryId: string) {
+  const token = createSessionToken();
+  const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS);
+  await prisma.authSession.create({
+    data: { beneficiaryId, tokenHash: hashSecret(token, "session", config.authPepper), expiresAt },
+  });
+  return { accessToken: token, tokenType: "Bearer", expiresAt: expiresAt.toISOString() };
 }
 
 function findNextSchedule(beneficiaryId: string) {
@@ -374,9 +422,12 @@ app.get("/beneficiaries/me/wallet", async (req, res) => {
         transactions: {
           where: {
             beneficiaryId: beneficiary.beneficiaryId,
-            claim: { beneficiaryId: beneficiary.beneficiaryId },
+            OR: [{ claimId: null }, { claim: { beneficiaryId: beneficiary.beneficiaryId } }],
           },
-          include: { claim: { include: { distribution: { include: { program: true } } } } },
+          include: {
+            claim: { include: { distribution: { include: { program: true } } } },
+            counterpartyWallet: { select: { walletNumber: true } },
+          },
           orderBy: { createdAt: "desc" },
         },
       },
@@ -392,7 +443,7 @@ app.get("/beneficiaries/me/wallet", async (req, res) => {
     ? claims.find((claim) => claim.distributionId === nextSchedule.distributionId)
     : undefined;
   const transactionsByClaimId = new Map(
-    wallet?.transactions.map((transaction) => [transaction.claimId, transaction]) ?? [],
+    wallet?.transactions.flatMap((transaction) => (transaction.claimId ? [[transaction.claimId, transaction] as const] : [])) ?? [],
   );
 
   res.json({
@@ -400,6 +451,8 @@ app.get("/beneficiaries/me/wallet", async (req, res) => {
       wallet: wallet
         ? {
             id: wallet.walletId,
+            walletNumber: wallet.walletNumber,
+            simulated: true,
             balance: Number(wallet.balance),
             currency: wallet.currency,
             status: wallet.accountStatus,
@@ -455,14 +508,19 @@ app.get("/beneficiaries/me/wallet", async (req, res) => {
           reference: transaction.referenceNo,
           status: transaction.status,
           createdAt: transaction.createdAt.toISOString(),
-          claimStatus: transaction.claim.claimStatus,
-          claimedAt: transaction.claim.claimedAt?.toISOString() ?? null,
-          date: transaction.claim.distribution.distributionDate.toISOString().slice(0, 10),
-          program: {
-            id: transaction.claim.distribution.program.programId,
-            code: transaction.claim.distribution.program.programCode,
-            name: transaction.claim.distribution.program.programName,
-          },
+          claimStatus: transaction.claim?.claimStatus ?? null,
+          claimedAt: transaction.claim?.claimedAt?.toISOString() ?? null,
+          date: (transaction.claim?.distribution.distributionDate ?? transaction.createdAt).toISOString().slice(0, 10),
+          simulated: !transaction.claimId,
+          counterpartyWalletNumber: transaction.counterpartyWallet?.walletNumber ?? null,
+          note: transaction.note,
+          program: transaction.claim
+            ? {
+                id: transaction.claim.distribution.program.programId,
+                code: transaction.claim.distribution.program.programCode,
+                name: transaction.claim.distribution.program.programName,
+              }
+            : null,
         })) ?? [],
     },
   });
@@ -553,6 +611,8 @@ app.post("/beneficiaries/me/claim-pass", async (req, res) => {
     },
   });
 });
+
+registerExtendedRoutes(app, { requireBeneficiary, issueOtp, consumeOtp, createSession, publicBeneficiary, walletNumberFor });
 
 app.use((_req, _res, next) => next(new ApiError(404, "NOT_FOUND", "Endpoint not found.")));
 

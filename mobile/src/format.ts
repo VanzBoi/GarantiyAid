@@ -64,5 +64,19 @@ export function formatClaimStatus(status: string, t: (en: string, bs: string) =>
 
 export function formatTransactionType(type: string, t: (en: string, bs: string) => string) {
   if (type === 'benefit_reversal') return t('Assistance reversal', 'Pagbalik sa narekord nga ayuda');
+  if (type === 'simulated_credit') return t('Simulated credit', 'Simulated nga credit');
+  if (type === 'simulated_transfer_out') return t('Simulated transfer sent', 'Simulated nga gipadala');
+  if (type === 'simulated_transfer_in') return t('Simulated transfer received', 'Simulated nga nadawat');
   return t('Assistance ledger entry', 'Narekord nga ayuda');
+}
+
+/** Program name, or a wallet label for simulated entries that are not tied to a claim. */
+export function transactionSource(
+  entry: { program: { name: string } | null; counterpartyWalletNumber?: string | null },
+  t: (en: string, bs: string) => string,
+) {
+  if (entry.program) return entry.program.name;
+  return entry.counterpartyWalletNumber
+    ? t(`Simulated wallet · ${entry.counterpartyWalletNumber}`, `Simulated wallet · ${entry.counterpartyWalletNumber}`)
+    : t('Simulated wallet', 'Simulated wallet');
 }

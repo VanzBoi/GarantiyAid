@@ -8,7 +8,7 @@
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
-    "test:integration": "tsx --test test/*.integration.ts",
+    "test:integration": "tsx --test --test-concurrency=1 test/*.integration.ts",
     "db:generate": "prisma generate",
     "db:local": "node scripts/local-db.mjs",
     "db:migrate": "prisma migrate dev",

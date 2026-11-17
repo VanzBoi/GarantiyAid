@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { TextInput, View } from 'react-native';
 import { router } from 'expo-router';
-import { Badge, Button, Card, Notice, styles, Txt } from '../components';
+import { Badge, Button, Card, Chip, EmptyState, Notice, ScreenIntro, SectionHeader, styles, Txt } from '../components';
 import { ApiRequestError, createSupportRequest, getSupportRequest, getSupportRequests, replySupportRequest,
   type SupportList, type SupportThread } from '../api';
 import { useDemo } from '../state';
@@ -32,6 +32,7 @@ function SupportWorkspace() {
   const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [topic, setTopic] = useState('');
   const mounted = useRef(true), pending = useRef(false), listRead = useRef(0), threadRead = useRef(0);
   const attempt = useRef<{ key: string; id: string; language: string } | null>(null);
   useEffect(() => { mounted.current = true; void loadList(); return () => { mounted.current = false; }; }, []);
@@ -77,30 +78,54 @@ function SupportWorkspace() {
   }
   const status = (value: string) => value === 'resolved' ? t('Resolved', 'Nasulbad')
     : value === 'ended' ? t('Closed', 'Gisirad-an') : t('Open', 'Bukas');
+  // The support API stores only message text, so a chosen concern type is written into the editable draft.
+  const topics = [
+    t('Claiming schedule', 'Iskedyul sa pag-claim'),
+    t('QR claim pass', 'QR claim pass'),
+    t('Enrollment or documents', 'Enrollment o dokumento'),
+    t('Wallet record', 'Rekord sa wallet'),
+    t('Other concern', 'Laing kabalaka'),
+  ];
+  const chooseTopic = (value: string) => {
+    setTopic(value);
+    if (!draft.trim() || topics.some(item => draft.trim() === `${item}:`)) setDraft(`${value}: `);
+  };
   return <>
-    <Txt variant="title">{t('Get help from staff', 'Pangayo og tabang sa staff')}</Txt>
+    {!selectedId && <ScreenIntro iconName="user" size={60} title={t('Get help from staff', 'Pangayo og tabang sa staff')}
+      subtitle={t('Your concern will be forwarded to authorized support staff.', 'Ipasa ang imong kabalaka sa awtorisadong support staff.')} />}
     <Notice>{t('Send a concern to authorized staff. Replies are not instant; refresh to check for updates. Do not include passwords, codes or ID numbers.', 'Tipigan ang imong kabalaka alang sa awtorisadong staff. Dili dayon ang tubag; i-refresh aron masusi ang mga update. Ayaw iapil ang password, code o numero sa ID.')}</Notice>
     {!!error && <Notice tone="error">{error}</Notice>}
     {selectedId ? <>
       <Button variant="outline" disabled={sending} onPress={() => { ++threadRead.current; setLoadingThread(false); setSelectedId(null); setThread(null); setDraft(''); attempt.current = null; void loadList(); }}>{t('Back to requests', 'Balik sa mga request')}</Button>
       {loadingThread && <Notice>{t('Loading conversation…', 'Gikuha ang panag-istorya…')}</Notice>}
       {thread && <>
-        <Card>
-          <Badge tone={thread.request.status === 'resolved' ? 'success' : 'warning'}>{status(thread.request.status)}</Badge>
-          <Txt variant="small">{t('Request reference', 'Reference sa request')}: {thread.request.id}</Txt>
+        <Card style={{ gap: 8 }}>
+          <Badge tone={thread.request.status === 'resolved' ? 'success' : thread.request.status === 'ended' ? 'neutral' : 'warning'}>{status(thread.request.status)}</Badge>
+          <Txt variant="small" selectable>{t('Request reference', 'Reference sa request')}: {thread.request.id}</Txt>
           <Txt variant="small">{t('Updated', 'Gi-update')}: {formatDateTime(thread.request.updatedAt)}</Txt>
           <Txt variant="small">{t('Retained until', 'Tipigan hangtod')}: {formatDateTime(thread.request.retentionUntil)}</Txt>
         </Card>
-        {thread.messages.map(message => <Card key={message.id}>
-          <Txt variant="label">{message.role === 'staff' ? t('Staff reply', 'Tubag sa staff') : message.role === 'user' ? t('You', 'Ikaw') : t('Assistant', 'Assistant')}</Txt>
-          <Txt selectable>{message.text}</Txt>
-          <Txt variant="small">{formatDateTime(message.createdAt)}</Txt>
-        </Card>)}
+        {thread.messages.map(message => {
+          const mine = message.role === 'user';
+          return <View key={message.id} style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4 }}>
+            <Txt variant="small" style={{ marginHorizontal: 6 }}>{message.role === 'staff' ? t('Staff reply', 'Tubag sa staff') : mine ? t('You', 'Ikaw') : t('Assistant', 'Assistant')}</Txt>
+            <View style={{ maxWidth: '86%', borderRadius: 20, paddingVertical: 12, paddingHorizontal: 15,
+              backgroundColor: mine ? c.primary : c.card, borderWidth: mine ? 0 : 1, borderColor: c.outline,
+              borderBottomRightRadius: mine ? 6 : 20, borderBottomLeftRadius: mine ? 20 : 6 }}>
+              <Txt selectable style={{ color: mine ? c.onPrimary : c.text }}>{message.text}</Txt>
+            </View>
+            <Txt variant="small" style={{ fontSize: 12, marginHorizontal: 6 }}>{formatDateTime(message.createdAt)}</Txt>
+          </View>;
+        })}
         {!thread.request.canReply && <Notice>{t('This request cannot accept more replies. You can create a new request if you still need help.', 'Dili na makadawat og dugang tubag kini nga request. Paghimo og bag-ong request kon kinahanglan pa og tabang.')}</Notice>}
       </>}
       <Button variant="outline" loading={loadingThread} disabled={sending} onPress={() => void loadThread(selectedId)}>{t('Refresh conversation', 'I-refresh ang panag-istorya')}</Button>
     </> : <>
-      <Txt variant="heading">{t('New concern', 'Bag-ong kabalaka')}</Txt>
+      <SectionHeader title={t('New concern', 'Bag-ong kabalaka')} />
+      <Txt variant="label">{t('Concern type', 'Klase sa kabalaka')}</Txt>
+      <View accessibilityRole="radiogroup" style={[styles.row, { flexWrap: 'wrap', gap: 8 }]}>
+        {topics.map(item => <Chip key={item} label={item} selected={topic === item} onPress={() => chooseTopic(item)} />)}
+      </View>
     </>}
     {(!selectedId || thread?.request.canReply) && <View style={{ gap: 8 }}>
       <Txt variant="label">{selectedId ? t('Your reply', 'Imong tubag') : t('Describe your concern', 'Ihulagway ang imong kabalaka')}</Txt>
@@ -108,17 +133,20 @@ function SupportWorkspace() {
         value={draft} onChangeText={setDraft} multiline maxLength={1000} editable={!sending}
         placeholder={t('For example: I need help with my enrollment.', 'Pananglitan: Kinahanglan ko og tabang sa akong enrollment.')} placeholderTextColor={c.muted}
         style={[styles.input, { minHeight: 120, textAlignVertical: 'top' }]} />
-      <Txt variant="small">{draft.length}/1000</Txt>
+      <Txt variant="small" style={{ textAlign: 'right' }}>{draft.length}/1000</Txt>
       <Button loading={sending} disabled={!draft.trim() || loadingThread} onPress={() => void send()}>{selectedId ? t('Send reply', 'Ipadala ang tubag') : t('Send to staff', 'Ipadala sa staff')}</Button>
     </View>}
     {!selectedId && <>
-      <Txt variant="heading">{t('Your requests', 'Imong mga request')}</Txt>
+      <SectionHeader title={t('Your requests', 'Imong mga request')} />
       <Button variant="outline" loading={loading} disabled={sending} onPress={() => void loadList(list?.pagination.page ?? 1)}>{t('Refresh requests', 'I-refresh ang mga request')}</Button>
-      {!loading && !error && list?.requests.length === 0 && <Notice>{t('No saved requests yet. Send a concern above when you need help.', 'Wala pay natipig nga request. Ipadala ang kabalaka sa ibabaw kon kinahanglan og tabang.')}</Notice>}
-      {list?.requests.map(item => <Card key={item.id}>
-        <Badge tone={item.status === 'resolved' ? 'success' : 'warning'}>{status(item.status)}</Badge>
-        <Txt numberOfLines={3}>{item.subject}</Txt>
-        <Txt variant="small">{formatDateTime(item.updatedAt)}</Txt>
+      {!loading && !error && list?.requests.length === 0 && <EmptyState title={t('No requests yet', 'Wala pay request')}
+        body={t('No saved requests yet. Send a concern above when you need help.', 'Wala pay natipig nga request. Ipadala ang kabalaka sa ibabaw kon kinahanglan og tabang.')} />}
+      {list?.requests.map(item => <Card key={item.id} style={{ gap: 10 }}>
+        <View style={[styles.row, { justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }]}>
+          <Badge tone={item.status === 'resolved' ? 'success' : item.status === 'ended' ? 'neutral' : 'warning'}>{status(item.status)}</Badge>
+          <Txt variant="small">{formatDateTime(item.updatedAt)}</Txt>
+        </View>
+        <Txt variant="label" numberOfLines={3}>{item.subject}</Txt>
         <Button variant="outline" disabled={sending} onPress={() => open(item.id)}>{t('Open request', 'Ablihi ang request')}</Button>
       </Card>)}
       {list && list.pagination.totalPages > 1 && <>

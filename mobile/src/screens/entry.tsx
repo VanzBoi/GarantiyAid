@@ -11,27 +11,36 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { BiometricConsentScreen, BiometricEnrollmentScreen } from './biometrics';
 import { StatusBar } from 'expo-status-bar';
 import {
-  ArrowLeft,
   CalendarDays,
-  Check,
+  ArrowRight,
   ContactRound,
   MapPin,
+  MessageSquareText,
+  QrCode,
   ScanFace,
   ShieldCheck,
+  UserPlus,
 } from 'lucide-react-native';
 import {
+  Badge,
   Button,
   Card,
   Field,
   flow,
-  Header,
+  GradientCard,
+  IconCircle,
   LanguageToggle,
   Logo,
   Notice,
   Page,
   PhoneField,
+  ScreenIntro,
+  Shake,
+  StepProgress,
   styles,
+  TextLink,
   Txt,
+  WelcomeIllustration,
 } from '../components';
 import { useDemo } from '../state';
 import { BarangayPicker } from '../barangay-picker';
@@ -48,101 +57,96 @@ import { colors as c, fonts } from '../theme';
 
 export function Onboarding() {
   const { t } = useDemo();
+  const features = [
+    {
+      Icon: CalendarDays,
+      title: t('Know your schedule', 'Hibaloi imong iskedyul'),
+      body: t(
+        'Get exact dates and times to avoid long lines.',
+        'Hibaloi ang petsa ug oras aron malikayan ang taas nga pila.',
+      ),
+      tone: 'primary' as const,
+    },
+    {
+      Icon: QrCode,
+      title: t('Show your QR claim pass', 'Ipakita ang QR claim pass'),
+      body: t(
+        'A secure pass issued for your assigned distribution.',
+        'Luwas nga pass alang sa imong gi-assign nga distribution.',
+      ),
+      tone: 'accent' as const,
+    },
+    {
+      Icon: ShieldCheck,
+      title: t('Claim safely', 'Luwas nga pag-claim'),
+      body: t(
+        'Verify your identity for a secure process.',
+        'Iverify ang imong pagkatawo alang sa luwas nga proseso.',
+      ),
+      tone: 'green' as const,
+    },
+  ];
   return (
     <Page
       header={false}
       footer={
         <>
-          <Button onPress={() => flow('account-info')}>
+          <Button icon={ArrowRight} onPress={() => flow('account-info')}>
             {t('Create Account', 'Paghimo og Account')}
           </Button>
-          <View style={[styles.row, { justifyContent: 'center', gap: 4 }]}>
-            <Txt variant="small">
-              {t('Already have an account?', 'Naa na kay account?')}
-            </Txt>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => flow('login')}
-              style={s.textLink}
-            >
-              <Txt variant="small" style={{ color: c.primary, fontFamily: fonts.bold }}>
-                {t('Log in', 'Log in')}
-              </Txt>
-            </Pressable>
+          <View style={[styles.row, { justifyContent: 'center', gap: 2 }]}>
+            <Txt variant="small">{t('Already have an account?', 'Naa na kay account?')}</Txt>
+            <TextLink onPress={() => flow('login')}>{t('Log in', 'Log in')}</TextLink>
           </View>
         </>
       }
     >
-      <View style={{ alignItems: 'flex-end' }}>
-        <LanguageToggle full />
+      <View style={[styles.row, { justifyContent: 'space-between', gap: 8 }]}>
+        <View style={[styles.row, { gap: 8 }]}>
+          <Logo size={30} />
+          <Txt variant="label" style={{ color: c.navy }}>GarantiyAid</Txt>
+        </View>
+        <LanguageToggle />
       </View>
-      <View style={s.welcomeHero}>
-        <Logo size={56} halo />
-        <Txt variant="title" style={{ textAlign: 'center' }}>
-          {t('Welcome to\nGarantiyAid', 'Maayong pag-abot sa\nGarantiyAid')}
-        </Txt>
-        <Txt style={s.centerMuted}>
-          {t(
-            'A safer, easier way to view your schedule and claim your government assistance.',
-            'Mas luwas ug sayon nga paagi sa pagtan-aw sa iskedyul ug pag-claim sa imong ayuda.',
-          )}
-        </Txt>
+      <GradientCard style={{ paddingBottom: 0, gap: 0 }}>
+        <View style={s.welcomeHero}>
+          <View style={s.welcomeEyebrow}>
+            <ShieldCheck size={14} color="#D9E6FF" />
+            <Txt variant="caption" style={{ color: '#D9E6FF', letterSpacing: 1.2 }}>
+              {t('YOUR ASSISTANCE COMPANION', 'KAUBAN SA IMONG AYUDA')}
+            </Txt>
+          </View>
+          <Txt accessibilityRole="header" variant="display" style={{ color: c.onPrimary, fontSize: 34, lineHeight: 41 }}>
+            {t('Your assistance.\nA little easier.', 'Imong ayuda.\nMas sayon na.')}
+          </Txt>
+          <Txt style={{ color: '#DFEAFF', maxWidth: 290, lineHeight: 23 }}>
+            {t('Your schedule, claim pass, and updates. Together in one place.', 'Imong iskedyul, claim pass, ug mga update. Anaa sa usa ka lugar.')}
+          </Txt>
+        </View>
+        <WelcomeIllustration height={72} />
+      </GradientCard>
+      <View style={{ gap: 4, paddingTop: 4 }}>
+        <Txt variant="heading">{t('Here for every step', 'Kauban sa matag lakang')}</Txt>
+        <Txt variant="small">{t('A simpler way to stay ready for claiming day.', 'Mas sayon nga pagpangandam sa adlaw sa pag-claim.')}</Txt>
       </View>
-      <View style={s.features}>
-        {[
-          {
-            Icon: CalendarDays,
-            title: t('Know your schedule', 'Hibaloi imong iskedyul'),
-            body: t(
-              'Get exact dates and times to avoid long lines.',
-              'Hibaloi ang petsa ug oras aron malikayan ang taas nga pila.',
-            ),
-            bg: c.primarySoft,
-            color: c.primary,
-          },
-          {
-            Icon: ShieldCheck,
-            title: t('Claim safely', 'Luwas nga pag-claim'),
-            body: t(
-              'Verify your identity for a secure process.',
-              'Iverify ang imong pagkatawo alang sa luwas nga proseso.',
-            ),
-            bg: c.greenSoft,
-            color: c.green,
-          },
-        ].map(({ Icon, title, body, bg, color }) => (
-          <View key={title} style={[styles.row, { alignItems: 'flex-start' }]}>
-            <View style={[s.featureIcon, { backgroundColor: bg }]}>
-              <Icon size={20} color={color} />
-            </View>
-            <View style={{ flex: 1, gap: 4 }}>
+      <Card style={{ gap: 0, paddingVertical: 4 }}>
+        {features.map(({ Icon, title, body, tone }, index) => (
+          <View key={title} style={[styles.row, s.featureRow, index < features.length - 1 && { borderBottomWidth: 1, borderBottomColor: c.outline }]}>
+            <IconCircle icon={Icon} tone={tone} size={44} square />
+            <View style={{ flex: 1, gap: 3 }}>
               <Txt variant="label">{title}</Txt>
               <Txt variant="small">{body}</Txt>
             </View>
           </View>
         ))}
-      </View>
+      </Card>
     </Page>
   );
 }
 
 function Progress({ step, total }: { step: number; total: number }) {
   const { t } = useDemo();
-  return (
-    <View style={s.progressWrap}>
-      <View style={[styles.row, { justifyContent: 'space-between' }]}>
-        <Txt variant="small" style={{ color: c.primary, fontFamily: fonts.semibold }}>
-          {t(`Step ${step} of ${total}`, `Lakang ${step} sa ${total}`)}
-        </Txt>
-        <Txt variant="small">{Math.round((step / total) * 100)}%</Txt>
-      </View>
-      <View style={s.progressTrack}>
-        <View
-          style={[s.progressFill, { width: `${(step / total) * 100}%` as `${number}%` }]}
-        />
-      </View>
-    </View>
-  );
+  return <StepProgress step={step} total={total} label={t(`Step ${step} of ${total}`, `Lakang ${step} sa ${total}`)} />;
 }
 
 const isValidBirthDate = (value: string) => {
@@ -220,30 +224,23 @@ export function AccountSetup() {
       footer={
         <>
           <Button onPress={continueToAddress}>{t('Continue', 'Padayon')}</Button>
-          <View style={[styles.row, { justifyContent: 'center', gap: 4 }]}>
-            <Txt variant="small">
-              {t('Already have an account?', 'Naa na kay account?')}
-            </Txt>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => flow('login')}
-              style={s.compactTextLink}
-            >
-              <Txt variant="small" style={{ color: c.primary, fontFamily: fonts.bold }}>
-                {t('Log in', 'Log in')}
-              </Txt>
-            </Pressable>
+          <View style={[styles.row, { justifyContent: 'center', gap: 2 }]}>
+            <Txt variant="small">{t('Already have an account?', 'Naa na kay account?')}</Txt>
+            <TextLink onPress={() => flow('login')}>{t('Log in', 'Log in')}</TextLink>
           </View>
         </>
       }
     >
       <View style={[styles.row, { justifyContent: 'space-between' }]}>
-        <Logo size={34} />
+        <View style={[styles.row, { gap: 8 }]}>
+          <Logo size={34} />
+          <Txt variant="label" style={{ color: c.navy }}>GarantiyAid</Txt>
+        </View>
         <LanguageToggle />
       </View>
       <Progress step={1} total={4} />
       <View style={{ gap: 7 }}>
-        <Txt variant="title">{t('Create your account', 'Paghimo sa imong account')}</Txt>
+        <Txt accessibilityRole="header" variant="title">{t('Create your account', 'Paghimo sa imong account')}</Txt>
         <Txt style={{ color: c.muted }}>
           {t(
             'Tell us about the beneficiary. Use the same information shown on official records.',
@@ -253,9 +250,7 @@ export function AccountSetup() {
       </View>
       <Card style={{ gap: 14 }}>
         <View style={styles.row}>
-          <View style={s.sectionIcon}>
-            <ContactRound size={20} color={c.primary} />
-          </View>
+          <IconCircle icon={ContactRound} size={40} square />
           <View style={{ flex: 1 }}>
             <Txt variant="label">
               {t('Personal information', 'Personal nga impormasyon')}
@@ -433,7 +428,7 @@ function AccountAddress() {
     >
       <Progress step={2} total={4} />
       <View style={{ gap: 7 }}>
-        <Txt variant="title">{t('Where do you live?', 'Asa ka nagpuyo?')}</Txt>
+        <Txt accessibilityRole="header" variant="title">{t('Where do you live?', 'Asa ka nagpuyo?')}</Txt>
         <Txt style={{ color: c.muted }}>
           {t(
             'Your address helps identify the barangay handling your assistance.',
@@ -443,9 +438,7 @@ function AccountAddress() {
       </View>
       <Card style={{ gap: 14 }}>
         <View style={styles.row}>
-          <View style={s.sectionIcon}>
-            <MapPin size={20} color={c.primary} />
-          </View>
+          <IconCircle icon={MapPin} size={40} square />
           <Txt variant="label">{t('Home address', 'Adres sa balay')}</Txt>
         </View>
         <Field
@@ -615,18 +608,9 @@ function PhoneEntry({ login }: { login: boolean }) {
               : t('Send Code', 'Ipadala ang Code')}
           </Button>
           {login ? (
-            <Pressable
-              accessibilityRole="button"
-              style={s.textLink}
-              onPress={() => router.push('/reset-password')}
-            >
-              <Txt variant="small" style={{ color: c.primary }}>
-                {t(
-                  'Trouble signing in? Recover account',
-                  'Dili maka-log in? Irecover ang account',
-                )}
-              </Txt>
-            </Pressable>
+            <TextLink onPress={() => router.push('/reset-password')}>
+              {t('Trouble signing in? Recover account', 'Dili maka-log in? Irecover ang account')}
+            </TextLink>
           ) : (
             <Txt variant="small" style={{ textAlign: 'center' }}>
               {t(
@@ -638,17 +622,15 @@ function PhoneEntry({ login }: { login: boolean }) {
         </>
       }
     >
-      <View style={{ alignItems: 'center' }}>
-        <Logo size={30} />
-      </View>
-      <View style={{ gap: 10, marginTop: login ? 18 : 32 }}>
-        {!login && <Progress step={3} total={4} />}
-        <Txt variant="title">
+      {!login && <Progress step={3} total={4} />}
+      <View style={{ alignItems: 'center', gap: 14, paddingTop: login ? 8 : 0 }}>
+        <Logo size={login ? 64 : 52} halo={login} />
+        <Txt accessibilityRole="header" variant="title" style={{ textAlign: 'center' }}>
           {login
-            ? t('Welcome back', 'Maayong pagbalik')
-            : t('Enter your mobile\nnumber', 'Isulod imong numero\nsa cellphone')}
+            ? t('Welcome back!', 'Maayong pagbalik!')
+            : t('Enter your mobile number', 'Isulod imong numero sa cellphone')}
         </Txt>
-        <Txt style={{ color: c.muted }}>
+        <Txt style={{ color: c.muted, textAlign: 'center', maxWidth: 320 }}>
           {login
             ? t(
                 'Log in to view your schedule or claim your assistance.',
@@ -660,40 +642,7 @@ function PhoneEntry({ login }: { login: boolean }) {
               )}
         </Txt>
       </View>
-      {login && (
-        <>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push('/face-login')}
-            style={s.faceLogin}
-          >
-            <View
-              style={[
-                s.featureIcon,
-                {
-                  backgroundColor: c.primarySoft,
-                  width: 56,
-                  height: 56,
-                  borderRadius: 28,
-                },
-              ]}
-            >
-              <ScanFace size={28} color={c.primary} />
-            </View>
-            <Txt variant="label" style={{ color: c.primary }}>
-              {t('Login with Face', 'Log in pinaagi sa Nawong')}
-            </Txt>
-            <Txt variant="small">
-              {t('Faster and more secure', 'Mas paspas ug mas luwas')}
-            </Txt>
-          </Pressable>
-          <View style={[styles.row, { gap: 12 }]}>
-            <View style={s.rule} />
-            <Txt variant="small">{t('OR USE PHONE', 'O GAMITA ANG CELLPHONE')}</Txt>
-            <View style={s.rule} />
-          </View>
-        </>
-      )}
+      <Card style={{ gap: 14 }}>
       <PhoneField
         value={value}
         onChangeText={(text) => {
@@ -708,6 +657,35 @@ function PhoneEntry({ login }: { login: boolean }) {
           'Ma-expire ang imong verification code human sa lima ka minuto. Ayaw kini ipaambit.',
         )}
       </Notice>
+      </Card>
+      {login && (
+        <>
+          <TextLink onPress={() => router.push('/account/password-login')}>
+            {t('Log in with password instead', 'Log in gamit ang password')}
+          </TextLink>
+          <View style={[styles.row, { gap: 12 }]}>
+            <View style={s.rule} />
+            <Txt variant="small">{t('OTHER OPTIONS', 'UBANG PAAGI')}</Txt>
+            <View style={s.rule} />
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityHint={t('Explains why face login is not available yet.', 'Nagpasabot nganong dili pa magamit ang face login.')}
+            onPress={() => router.push('/face-login')}
+            style={({ pressed }) => [s.faceLogin, pressed && { backgroundColor: c.primarySoft }]}
+          >
+            <IconCircle icon={ScanFace} size={44} square tone="neutral" />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Txt variant="label">{t('Login with Face', 'Log in pinaagi sa Nawong')}</Txt>
+              <Badge tone="neutral">{t('Not available yet', 'Dili pa magamit')}</Badge>
+            </View>
+          </Pressable>
+          <View style={[styles.row, { justifyContent: 'center', gap: 2 }]}>
+            <Txt variant="small">{t("Don't have an account?", 'Wala pay account?')}</Txt>
+            <TextLink onPress={() => flow('account-info')}>{t('Register', 'Magparehistro')}</TextLink>
+          </View>
+        </>
+      )}
     </Page>
   );
 }
@@ -723,6 +701,7 @@ function OTP() {
   const [seconds, setSeconds] = useState(60);
   const [loading, setLoading] = useState(false);
   const [developmentOtp, setDevelopmentOtp] = useState(initialDevelopmentOtp);
+  const [shake, setShake] = useState(0);
   const purpose = intent === 'login' ? 'login' : 'register';
   useEffect(() => {
     const interval = setInterval(
@@ -745,6 +724,7 @@ function OTP() {
               await startSession(result.accessToken, result.beneficiary);
               intent === 'login' ? router.replace('/(tabs)/home') : flow('consent');
             } catch (requestError) {
+              setShake((value) => value + 1);
               setError(
                 requestError instanceof ApiRequestError
                   ? requestError.message
@@ -760,20 +740,24 @@ function OTP() {
       }
     >
       {intent === 'login' ? (
-        <Txt variant="small" style={{ color: c.primary, fontFamily: fonts.semibold }}>
-          {t('Login verification', 'Verification sa login')}
-        </Txt>
+        <Badge tone="info">{t('Login verification', 'Verification sa login')}</Badge>
       ) : (
         <Progress step={4} total={4} />
       )}
-      <Txt variant="title">{t('Enter your code', 'Isulod imong code')}</Txt>
-      <Txt style={{ color: c.muted }}>
-        {t(
-          'Enter the 6-digit verification code for',
-          'Isulod ang 6 ka numero nga verification code alang sa',
-        )}{' '}
-        <Txt variant="label">+63 {phone || '9175550147'}</Txt>
-      </Txt>
+      <ScreenIntro
+        icon={MessageSquareText}
+        title={t('Enter your code', 'Isulod imong code')}
+        subtitle={
+          <>
+            {t(
+              'Enter the 6-digit verification code for',
+              'Isulod ang 6 ka numero nga verification code alang sa',
+            )}{' '}
+            <Txt variant="label">+63 {phone || '9175550147'}</Txt>
+          </>
+        }
+      />
+      <Shake trigger={shake}>
       <View style={s.otpWrap}>
         <TextInput
           accessibilityLabel={t(
@@ -803,17 +787,19 @@ function OTP() {
               key={index}
               style={[
                 s.otpBox,
-                error && { borderColor: c.error },
-                code.length === index && { borderColor: c.primary },
+                !!code[index] && s.otpBoxFilled,
+                code.length === index && s.otpBoxActive,
+                !!error && { borderColor: c.error, backgroundColor: c.errorSoft },
               ]}
             >
-              <Txt variant="heading">{code[index] || ''}</Txt>
+              <Txt variant="heading" style={{ fontSize: 24, color: c.navy }}>{code[index] || ''}</Txt>
             </View>
           ))}
         </View>
       </View>
+      </Shake>
       {error ? (
-        <Txt variant="small" style={{ color: c.error }}>
+        <Txt accessibilityRole="alert" accessibilityLiveRegion="assertive" variant="small" style={{ color: c.error, textAlign: 'center' }}>
           {error}
         </Txt>
       ) : null}
@@ -842,7 +828,7 @@ function OTP() {
       >
         <Txt
           variant="small"
-          style={{ textAlign: 'center', color: seconds ? c.muted : c.primary }}
+          style={{ textAlign: 'center', color: seconds ? c.muted : c.primary, fontFamily: fonts.semibold }}
         >
           {seconds
             ? t(
@@ -872,61 +858,33 @@ function Consent() { return <BiometricConsentScreen />; }
 function Capture() { return <BiometricEnrollmentScreen />; }
 function FaceSuccess() { return <BiometricEnrollmentScreen />; }
 const s = StyleSheet.create({
-  progressWrap: { gap: 8 },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: c.outline,
-    overflow: 'hidden',
-  },
-  progressFill: { height: '100%', borderRadius: 3, backgroundColor: c.primary },
-  sectionIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: c.primarySoft,
-  },
   choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   choice: {
     minHeight: 48,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     borderRadius: 14,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: c.outline,
     backgroundColor: c.card,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 8,
   },
   choiceSelected: { borderColor: c.primary, backgroundColor: c.primarySoft },
   radio: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 1.5,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
     borderColor: c.muted,
     alignItems: 'center',
     justifyContent: 'center',
   },
   radioSelected: { borderColor: c.primary },
-  radioDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: c.primary },
-  compactTextLink: {
-    minHeight: 48,
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  welcomeHero: { alignItems: 'center', gap: 18, paddingTop: 12 },
-  centerMuted: { textAlign: 'center', color: c.muted, maxWidth: 290 },
-  features: { gap: 20, paddingTop: 8, paddingHorizontal: 4 },
-  featureIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: c.primary },
+  welcomeHero: { alignItems: 'flex-start', gap: 12, paddingTop: 6 },
+  welcomeEyebrow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  featureRow: { alignItems: 'center', gap: 14, paddingVertical: 14 },
   textLink: {
     minHeight: 48,
     justifyContent: 'center',
@@ -936,25 +894,28 @@ const s = StyleSheet.create({
   faceLogin: {
     borderWidth: 1,
     borderColor: c.outline,
-    borderRadius: 20,
+    borderRadius: 18,
     backgroundColor: c.card,
-    padding: 22,
+    padding: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 14,
   },
   rule: { height: 1, backgroundColor: c.outline, flex: 1 },
-  otpWrap: { height: 56, position: 'relative' },
+  otpWrap: { height: 62, position: 'relative' },
   // Keep the digit row opaque so native input text can't show through it.
-  otpBoxes: { flexDirection: 'row', gap: 6, height: 56, backgroundColor: c.surface, zIndex: 1 },
+  otpBoxes: { flexDirection: 'row', gap: 8, height: 62, backgroundColor: c.surface, zIndex: 1 },
   otpBox: {
     flex: 1,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: c.outline,
-    borderRadius: 11,
+    borderRadius: 14,
     backgroundColor: c.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  otpBoxFilled: { borderColor: c.primaryTint, backgroundColor: c.primarySoft },
+  otpBoxActive: { borderColor: c.primary, borderWidth: 2 },
   otpInput: {
     position: 'absolute',
     top: 0,

@@ -9,8 +9,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MessageCircle, Phone, Send } from 'lucide-react-native';
-import { go, LanguageToggle, Notice, styles, Txt } from '../components';
+import { Bot, History, Send, Sparkles, UserRound, Headset } from 'lucide-react-native';
+import { FadeIn, go, IconCircle, LanguageToggle, Notice, openRoute, styles, Txt } from '../components';
 import { peso, useDemo } from '../state';
 import {
   formatDate,
@@ -29,7 +29,7 @@ const greeting: Message = {
   bs: 'Kumusta! Ako ang assistant sa GarantiyAid. Makatabang ko sa imong iskedyul, dad-on, ug kahimtang sa claim. Unsay gusto nimong mahibal-an?',
 };
 export function HelpScreen() {
-  const { t, overview, overviewLoading, overviewError, wallet, walletError } = useDemo();
+  const { t, overview, overviewLoading, overviewError, wallet, walletError, saveChat } = useDemo();
   const [messages, setMessages] = useState<Message[]>([greeting]);
   const [input, setInput] = useState('');
   const scroll = useRef<ScrollView>(null);
@@ -170,6 +170,11 @@ export function HelpScreen() {
       },
     };
     const answer = answers[detected];
+    // Saved in the language shown, so chat history reads the way the person saw it.
+    saveChat?.([
+      { role: 'user', text: t(en, bs).trim() },
+      { role: 'assistant', text: t(answer.en, answer.bs) },
+    ]);
     setMessages((previous) => [
       ...previous,
       { id: previous.length, role: 'user', en: en.trim(), bs: bs.trim() },
@@ -186,31 +191,51 @@ export function HelpScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={[styles.header, { gap: 8 }]}>
-          <MessageCircle size={21} color={c.primary} />
-          <Txt variant="label" style={{ flex: 1 }}>
-            {t('Help', 'Tabang')}
-          </Txt>
+        <View style={s.header}>
+          <View style={s.botAvatar}>
+            <Bot size={24} color={c.onPrimary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Txt accessibilityRole="header" variant="label" numberOfLines={1}>
+              {t('Assistant', 'Katabang')}
+            </Txt>
+            <View style={[styles.row, { gap: 6 }]}>
+              <Txt variant="small" numberOfLines={2} style={{ fontSize: 12 }}>
+                {t('Answers from your saved records', 'Tubag gikan sa imong rekord')}
+              </Txt>
+            </View>
+          </View>
+          <LanguageToggle />
+        </View>
+        <View style={s.actions}>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={t('Talk to staff', 'Pakigsulti sa staff')}
             onPress={() => go('support')}
-            style={s.staff}
+            style={({ pressed }) => [s.action, pressed && { backgroundColor: c.primarySoft }]}
           >
-            <Phone size={12} color={c.primary} />
-            <Txt
-              variant="small"
-              style={{ fontSize: 10, color: c.primary, flexShrink: 1 }}
-            >
+            <Headset size={17} color={c.primary} />
+            <Txt variant="label" style={s.actionText}>
               {t('Talk to staff', 'Pakigsulti sa staff')}
             </Txt>
           </Pressable>
-          <LanguageToggle />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('Chat history', 'Kasaysayan sa chat')}
+            onPress={() => openRoute('/chat-history')}
+            style={({ pressed }) => [s.action, pressed && { backgroundColor: c.primarySoft }]}
+          >
+            <History size={17} color={c.primary} />
+            <Txt variant="label" style={s.actionText}>
+              {t('Chat history', 'Kasaysayan sa chat')}
+            </Txt>
+          </Pressable>
         </View>
         <ScrollView
           ref={scroll}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={s.messages}
-          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={() => { if (messages.length > 1) scroll.current?.scrollToEnd({ animated: true }); }}
         >
           <Notice>
             {t(
@@ -219,59 +244,59 @@ export function HelpScreen() {
             )}
           </Notice>
           {messages.map((message) => (
-            <View
-              key={message.id}
-              style={[
-                s.messageRow,
-                message.role === 'user' && { justifyContent: 'flex-end' },
-              ]}
-            >
-              {message.role === 'assistant' && (
-                <MessageCircle size={15} color={c.primary} style={{ marginTop: 13 }} />
-              )}
-              <View style={[s.bubble, message.role === 'user' && s.userBubble]}>
-                <Txt
-                  variant="small"
-                  style={{
-                    color: message.role === 'user' ? c.card : c.text,
-                    lineHeight: 20,
-                  }}
-                >
-                  {t(message.en, message.bs)}
-                </Txt>
+            <FadeIn key={message.id} distance={8}>
+              <View
+                accessible
+                accessibilityLabel={`${message.role === 'user' ? t('You', 'Ikaw') : t('Assistant', 'Assistant')}: ${t(message.en, message.bs)}`}
+                style={[s.messageRow, message.role === 'user' && { justifyContent: 'flex-end' }]}
+              >
+                {message.role === 'assistant' && (
+                  <IconCircle icon={Sparkles} size={32} tone="primary" />
+                )}
+                <View style={[s.bubble, message.role === 'user' ? s.userBubble : s.assistantBubble]}>
+                  <Txt
+                    style={{
+                      color: message.role === 'user' ? c.onPrimary : c.text,
+                      fontSize: 15,
+                      lineHeight: 22,
+                    }}
+                  >
+                    {t(message.en, message.bs)}
+                  </Txt>
+                </View>
+                {message.role === 'user' && <IconCircle icon={UserRound} size={32} tone="neutral" />}
               </View>
-            </View>
+            </FadeIn>
           ))}
           {messages.length === 1 && (
-            <View style={s.questions}>
-              {questions.map((question) => (
-                <Pressable
-                  accessibilityRole="button"
-                  key={question.kind}
-                  onPress={() => ask(question.en, question.bs, question.kind)}
-                  style={s.question}
-                >
-                  <Txt
-                    variant="small"
-                    style={{ fontSize: 11, color: c.primary, textAlign: 'center' }}
+            <View style={{ gap: 10 }}>
+              <Txt variant="label" style={{ fontSize: 13, color: c.muted }}>
+                {t('Suggested questions', 'Gisugyot nga pangutana')}
+              </Txt>
+              <View style={s.questions}>
+                {questions.map((question) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    key={question.kind}
+                    onPress={() => ask(question.en, question.bs, question.kind)}
+                    style={({ pressed }) => [s.question, pressed && { backgroundColor: c.primarySoft }]}
                   >
-                    {t(question.en, question.bs)}
-                  </Txt>
-                </Pressable>
-              ))}
+                    <Txt variant="label" style={{ color: c.primary, fontSize: 14 }}>
+                      {t(question.en, question.bs)}
+                    </Txt>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           )}
         </ScrollView>
         <View style={s.composer}>
           <TextInput
-            accessibilityLabel={t(
-              'Message to the assistant',
-              'Mensahe sa assistant',
-            )}
+            accessibilityLabel={t('Message to the assistant', 'Mensahe sa assistant')}
             value={input}
             onChangeText={setInput}
             placeholder={t('Type a message…', 'Isulat ang mensahe…')}
-            placeholderTextColor={c.muted}
+            placeholderTextColor={c.subtle}
             style={s.input}
             maxLength={500}
             onSubmitEditing={() => ask(input, input)}
@@ -280,14 +305,12 @@ export function HelpScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('Send message', 'Ipadala ang mensahe')}
+            accessibilityState={{ disabled: !input.trim() }}
             disabled={!input.trim()}
             onPress={() => ask(input, input)}
-            style={[
-              styles.iconButton,
-              { backgroundColor: input.trim() ? c.primary : c.outline },
-            ]}
+            style={[s.send, { backgroundColor: input.trim() ? c.primary : c.outline }]}
           >
-            <Send size={19} color={input.trim() ? c.card : c.muted} />
+            <Send size={20} color={input.trim() ? c.onPrimary : c.muted} />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -295,42 +318,77 @@ export function HelpScreen() {
   );
 }
 const s = StyleSheet.create({
-  staff: {
-    minHeight: 48,
-    width: 86,
-    paddingHorizontal: 8,
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-  },
-  messages: { padding: 20, gap: 16 },
-  messageRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  bubble: {
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.outline,
-    borderRadius: 14,
-    padding: 14,
-    maxWidth: '88%',
   },
-  userBubble: { backgroundColor: c.primary, borderWidth: 0 },
+  botAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 15,
+    backgroundColor: c.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    backgroundColor: c.card,
+    borderBottomWidth: 1,
+    borderColor: c.outline,
+  },
+  action: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: c.primaryTint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  actionText: { color: c.primary, fontSize: 13, flexShrink: 1 },
+  messages: { padding: 20, paddingBottom: 28, gap: 18 },
+  messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  bubble: {
+    borderRadius: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    maxWidth: '80%',
+    flexShrink: 1,
+  },
+  assistantBubble: {
+    backgroundColor: c.card,
+    borderBottomLeftRadius: 6,
+    borderWidth: 1,
+    borderColor: '#EDF1F6',
+    boxShadow: '0px 2px 8px rgba(16, 42, 86, 0.06)',
+  },
+  userBubble: { backgroundColor: c.primary, borderBottomRightRadius: 6 },
   questions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   question: {
     borderWidth: 1,
-    borderColor: c.outline,
-    borderRadius: 20,
-    paddingHorizontal: 10,
+    borderColor: c.primaryTint,
+    borderRadius: 14,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     minHeight: 48,
-    minWidth: '45%',
-    maxWidth: '48%',
     justifyContent: 'center',
     backgroundColor: c.card,
   },
   composer: {
     flexDirection: 'row',
-    gap: 8,
-    padding: 16,
+    gap: 10,
+    padding: 12,
+    paddingHorizontal: 16,
     alignItems: 'center',
     borderTopWidth: 1,
     borderColor: c.outline,
@@ -338,13 +396,21 @@ const s = StyleSheet.create({
   },
   input: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 50,
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: c.text,
+    backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.outline,
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: c.text,
+  },
+  send: {
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

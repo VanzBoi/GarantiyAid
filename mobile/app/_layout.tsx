@@ -9,7 +9,7 @@ import { ActivityIndicator, View, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DemoProvider, useDemo } from '../src/state';
 import { colors } from '../src/theme';
-import { Button, Logo, Notice, Page, Txt } from '../src/components';
+import { Button, Logo, Notice, Page, ScreenIntro, useReducedMotion } from '../src/components';
 import { PushBridge } from '../src/push-bridge';
 
 export default function RootLayout() {
@@ -41,9 +41,11 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
 
 function RootContent({ fontsReady }: { fontsReady: boolean }) {
   const { accessToken, authError, authLoading, restoreSession, t } = useDemo();
+  const reducedMotion = useReducedMotion();
   if (!fontsReady || authLoading)
     return (
-      <View style={s.loading}>
+      <View style={s.loading} accessibilityLabel="Loading GarantiyAid">
+        <Logo size={56} halo />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -53,10 +55,11 @@ function RootContent({ fontsReady }: { fontsReady: boolean }) {
         <StatusBar style="dark" />
         {authError ? (
           <Page header={false} contentStyle={s.sessionError}>
-            <Logo size={50} halo />
-            <Txt variant="title" style={{ textAlign: 'center' }}>
-              {t('We could not restore your session', 'Wala namo ma-restore ang imong session')}
-            </Txt>
+            <ScreenIntro
+              iconName="alert"
+              tone="amber"
+              title={t('We could not restore your session', 'Wala namo ma-restore ang imong session')}
+            />
             <Notice tone="error">
               {t(
                 'Check that the backend is running, then try again. Your saved login has not been removed.',
@@ -72,7 +75,8 @@ function RootContent({ fontsReady }: { fontsReady: boolean }) {
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: colors.surface },
-                animation: 'default',
+                // Smooth native slide between screens; disabled when the system asks for reduced motion.
+                animation: reducedMotion ? 'none' : 'slide_from_right',
               }}
             >
               <Stack.Screen name="index" />
@@ -90,6 +94,7 @@ function RootContent({ fontsReady }: { fontsReady: boolean }) {
 const s = StyleSheet.create({
   loading: {
     flex: 1,
+    gap: 20,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surface,
@@ -97,8 +102,8 @@ const s = StyleSheet.create({
   outer: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: Platform.OS === 'web' ? '#E9EEF4' : colors.surface,
+    backgroundColor: Platform.OS === 'web' ? '#E4EAF3' : colors.surface,
   },
   app: { flex: 1, width: '100%', maxWidth: Platform.OS === 'web' ? 430 : undefined },
-  sessionError: { justifyContent: 'center', alignItems: 'stretch' },
+  sessionError: { justifyContent: 'center', alignItems: 'stretch', gap: 20 },
 });

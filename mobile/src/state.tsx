@@ -12,6 +12,7 @@ import {
   getBiometrics,
   giveBiometricConsent,
   revokeBiometricConsent,
+  saveAssistantMessages,
   type BiometricOverview,
   type BiometricConsentInput,
   type Beneficiary,
@@ -52,6 +53,10 @@ type DemoState = {
   accessToken: string;
   beneficiary: Beneficiary | null;
   saveProfile: (input: ProfileUpdate) => Promise<Beneficiary | null>;
+  /** Applies a beneficiary record the server just returned (password or email changes). */
+  saveBeneficiary: (value: Beneficiary) => void;
+  /** Saves an assistant exchange when the server supports chat history; failures are ignored. */
+  saveChat: (messages: { role: 'user' | 'assistant'; text: string }[]) => void;
   documents: BeneficiaryDocument[] | null;
   documentsLoading: boolean;
   documentsError: boolean;
@@ -400,6 +405,15 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
         accessToken,
         beneficiary,
         saveProfile,
+        saveBeneficiary: (value) => {
+          if (accessToken && renderedSessionVersion === sessionVersion.current) applyBeneficiary(value);
+        },
+        saveChat: (messages) => {
+          if (!accessToken || renderedSessionVersion !== sessionVersion.current) return;
+          void Promise.resolve()
+            .then(() => saveAssistantMessages(accessToken, messages))
+            .catch(() => {});
+        },
         documents,
         documentsLoading,
         documentsError,

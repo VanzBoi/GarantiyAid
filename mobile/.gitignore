@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+public/face-model/
 
 # Expo
 .expo/
@@ -39,3 +40,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Generated native build output for local Expo modules
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/

@@ -68,6 +68,10 @@ export type Beneficiary = {
   address: string;
   barangayId: string;
   contactNumber: string;
+  /** Present on servers with email verification; null until an address is verified. */
+  email?: string | null;
+  /** Present on servers with password sign-in. */
+  hasPassword?: boolean;
   isVerified: boolean;
   status: string;
 };
@@ -75,11 +79,13 @@ export type Beneficiary = {
 export type ProfileUpdate = Pick<Beneficiary, 'firstName' | 'middleName' | 'lastName' | 'address' | 'barangayId'>;
 
 export type BiometricOverview = {
-  enrollmentMethod: 'staff_assisted';
+  enrollmentMethod: 'staff_assisted' | 'self_capture';
   processorMode: 'simulated' | 'remote';
+  /** True when this server accepts in-app face capture (simulated processor). */
+  selfCapture?: boolean;
   policy: { version: string; retentionUntil: string };
   consent: null | { id: string; version: string; status: string; consentedAt: string; revokedAt: string | null; retentionUntil: string };
-  profile: null | { id: string; consentId: string; status: string; simulated: boolean; processorCompatible: boolean; enrolledAt: string; lastVerifiedAt: string | null };
+  profile: null | { id: string; consentId: string; status: string; simulated: boolean; processorCompatible: boolean; livenessPassed?: boolean; enrolledAt: string; lastVerifiedAt: string | null };
 };
 export type BiometricConsentInput = { consentVersion: string; retentionUntil: string; expectedConsentId: string | null };
 
@@ -224,21 +230,27 @@ export type CurrentClaim = Omit<ClaimRecord, 'id' | 'createdAt'> & {
 
 export type WalletTransaction = {
   id: string;
-  claimId: string;
+  /** Null for simulated credits and transfers, which are not tied to a claim. */
+  claimId: string | null;
   amount: number;
   type: string;
   reference: string;
   status: string;
   createdAt: string;
-  claimStatus: string;
+  claimStatus: string | null;
   claimedAt: string | null;
   date: string;
-  program: { id: string; code: string; name: string };
+  simulated?: boolean;
+  counterpartyWalletNumber?: string | null;
+  note?: string | null;
+  program: { id: string; code: string; name: string } | null;
 };
 
 export type WalletOverview = {
   wallet: {
     id: string;
+    walletNumber?: string;
+    simulated?: boolean;
     balance: number;
     currency: string;
     status: string;
@@ -508,4 +520,107 @@ export async function uploadDocument(accessToken: string, asset: DocumentPickerA
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': mimeType,
       'X-File-Name': encodeURIComponent(asset.name), 'X-Document-Type': docType },
   }, 60_000)).data;
+}
+
+// ───────────── Password, email, simulated wallet, simulated face, assistant history ─────────────
+const auth = (accessToken: string) => ({ Authorization: `Bearer ${accessToken}` });
+type Session = { accessToken: string; tokenType: 'Bearer'; expiresAt: string; beneficiary: Beneficiary };
+
+/** True when the connected server does not provide an endpoint (for example the shared staff backend). */
+export function isUnavailableOnServer(error: unknown) {
+  return error instanceof ApiRequestError && error.status === 404 && (error.code === 'NOT_FOUND' || error.code === 'ROUTE_NOT_FOUND');
+}
+
+export async function passwordLogin(contactNumber: string, password: string) {
+  return (await request<{ data: Session }>('/auth/password/login', {
+    method: 'POST', body: JSON.stringify({ contactNumber, password }),
+  })).data;
+}
+export async function changePassword(accessToken: string, input: { currentPassword?: string; newPassword: string }) {
+  return (await request<{ data: Beneficiary }>('/beneficiaries/me/password', {
+    method: 'PUT', headers: auth(accessToken), body: JSON.stringify(input),
+  })).data;
+}
+export async function requestPasswordReset(contactNumber: string) {
+  return (await request<OtpResponse>('/auth/password/reset/request', {
+    method: 'POST', body: JSON.stringify({ contactNumber }),
+  }, 20_000)).data;
+}
+export async function resetPassword(input: { contactNumber: string; code: string; newPassword: string }) {
+  return (await request<{ data: { passwordReset: boolean } }>('/auth/password/reset', {
+    method: 'POST', body: JSON.stringify(input),
+  })).data;
+}
+export async function requestEmailCode(accessToken: string, email: string) {
+  return (await request<{ data: { email: string; expiresInSeconds: number; developmentOtp?: string } }>('/beneficiaries/me/email', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify({ email }),
+  }, 20_000)).data;
+}
+export async function verifyEmail(accessToken: string, email: string, code: string) {
+  return (await request<{ data: Beneficiary }>('/beneficiaries/me/email/verify', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify({ email, code }),
+  })).data;
+}
+
+export type WalletSummary = NonNullable<WalletOverview['wallet']>;
+export async function createWallet(accessToken: string) {
+  return (await request<{ data: { wallet: WalletSummary; created: boolean } }>('/beneficiaries/me/wallet', {
+    method: 'POST', headers: auth(accessToken), body: '{}',
+  })).data;
+}
+export async function addSimulatedCredit(accessToken: string, input: { amount: number; requestId: string }) {
+  return (await request<{ data: { transaction: WalletTransaction; wallet: WalletSummary } }>('/beneficiaries/me/wallet/simulated-credits', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify(input),
+  })).data;
+}
+export async function lookupRecipient(accessToken: string, walletNumber: string) {
+  return (await request<{ data: { walletNumber: string; displayName: string } }>(`/beneficiaries/me/wallet/recipients/${encodeURIComponent(walletNumber)}`, {
+    headers: auth(accessToken),
+  })).data;
+}
+export async function sendSimulatedTransfer(accessToken: string, input: { recipientWalletNumber: string; amount: number; requestId: string; note?: string }) {
+  return (await request<{ data: { transaction: WalletTransaction; wallet: WalletSummary } }>('/beneficiaries/me/wallet/simulated-transfers', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify(input),
+  })).data;
+}
+
+export type FaceChallenge = { id: string; nonce: string; purpose: 'enroll' | 'verify'; poses: ('center' | 'blink' | 'left' | 'right')[]; expiresAt: string };
+export async function getFaceChallenge(accessToken: string, purpose: 'enroll' | 'verify') {
+  return (await request<{ data: FaceChallenge }>('/beneficiaries/me/biometrics/challenge', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify({ purpose }),
+  })).data;
+}
+export type FaceEnrollmentResult = { result: 'enrolled' | 'simulated_capture'; simulated: boolean; overview: BiometricOverview; liveness: { passed: boolean; simulated: boolean; method: string } };
+export async function enrollFace(accessToken: string, frames: string[], challengeId: string) {
+  return (await request<{ data: FaceEnrollmentResult }>('/beneficiaries/me/biometrics/enrollment', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify({ frames, challengeId }),
+  }, 60_000)).data;
+}
+export type FaceVerificationResult = { result: 'matched' | 'not_matched' | 'simulated_capture'; simulated: boolean; facesCompared: boolean;
+  livenessPassed: boolean; verifiedAt: string | null; overview: BiometricOverview };
+export async function verifyFace(accessToken: string, frames: string[], challengeId: string) {
+  return (await request<{ data: FaceVerificationResult }>('/beneficiaries/me/biometrics/verification', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify({ frames, challengeId }),
+  }, 60_000)).data;
+}
+
+export type AssistantMessage = { id: string; role: 'user' | 'assistant'; text: string; createdAt: string };
+export async function getAssistantMessages(accessToken: string) {
+  return (await request<{ data: AssistantMessage[] }>('/beneficiaries/me/assistant/messages', { headers: auth(accessToken) })).data;
+}
+export async function saveAssistantMessages(accessToken: string, messages: { role: 'user' | 'assistant'; text: string }[]) {
+  await request<unknown>('/beneficiaries/me/assistant/messages', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify({ messages }),
+  });
+}
+export async function clearAssistantMessages(accessToken: string) {
+  await request<null>('/beneficiaries/me/assistant/messages', { method: 'DELETE', headers: auth(accessToken) });
+}
+
+/** Random identifier so a retried wallet request is applied only once. */
+export function newRequestId() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (value) => {
+    const n = Math.floor(Math.random() * 16);
+    return (value === 'x' ? n : (n & 3) | 8).toString(16);
+  });
 }

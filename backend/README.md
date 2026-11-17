@@ -53,6 +53,26 @@ During development, OTP codes are printed in the backend terminal and returned a
 - `GET /beneficiaries/me/notifications`
 - `PATCH /beneficiaries/me/notifications/:notificationId/read`
 - `POST /beneficiaries/me/claim-pass`
+- `POST /auth/password/login`, `PUT /beneficiaries/me/password`
+- `POST /auth/password/reset/request`, `POST /auth/password/reset`
+- `POST /beneficiaries/me/email`, `POST /beneficiaries/me/email/verify`
+- `POST /beneficiaries/me/wallet`, `POST /beneficiaries/me/wallet/simulated-credits`
+- `GET /beneficiaries/me/wallet/recipients/:walletNumber`, `POST /beneficiaries/me/wallet/simulated-transfers`
+- `GET /beneficiaries/me/biometrics`, `POST /beneficiaries/me/biometric-consents`, `POST /beneficiaries/me/biometric-consents/:consentId/revoke`
+- `POST /beneficiaries/me/biometrics/enrollment`, `POST /beneficiaries/me/biometrics/verification`
+- `GET`, `POST`, `DELETE /beneficiaries/me/assistant/messages`
+
+### Password, email, simulated wallet, simulated face, and assistant history
+
+These routes live in `src/extended.ts` and need migration `20261117000000_add_simulated_wallet_biometrics_assistant`.
+
+- **Passwords** are optional. They are hashed with scrypt in the existing `password_hash` column, need 8–128 characters with a letter and a number, and lock for 15 minutes after five wrong attempts per number. Changing a password signs out other sessions; a reset (SMS code purpose `reset`) signs out every session.
+- **Email** uses the existing `email` column. The six-digit code is bound to the address that requested it. Development responses return `developmentOtp` because email delivery is not connected.
+- **Wallet** activity is a simulation. Verified accounts can create a wallet (number `GA-XXXXXXXX`), add simulated credit (₱1–₱5,000 per request, ₱50,000 cap), and send simulated transfers to another active wallet (₱1–₱5,000). Each request carries a `requestId` so retries apply once. Simulated entries have no claim and are labelled `simulated: true`. No real money is held or moved.
+- **Face capture** uses a simulated processor. The app sends three photos for enrollment (two for verification) after consent. The server checks that they are distinct images (prompt completion), keeps only an HMAC of one photo's hash, and discards the photos. It never compares faces or detects spoofing; verification returns `result: "simulated_match"` with `facesCompared: false`.
+- **Assistant history** stores the questions and automated answers shown in Help, per account, and can be cleared.
+
+The seed adds a second verified demo account, `0917 555 0148`, with an empty wallet to receive simulated transfers. Both wallet numbers are printed when seeding.
 
 Protected endpoints use `Authorization: Bearer <accessToken>`. Access tokens are random, stored only as hashes, expire after seven days, and are revoked by logout.
 

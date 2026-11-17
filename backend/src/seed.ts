@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "./generated/prisma/client.ts";
+import { walletNumberFor } from "./security.ts";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required.");
@@ -181,10 +183,13 @@ const claim = await prisma.claim.upsert({
   },
 });
 
+const walletId = randomUUID();
 const wallet = await prisma.walletAccount.upsert({
   where: { beneficiaryId: beneficiary.beneficiaryId },
   update: { balance: "1500.00", currency: "PHP", accountStatus: "active", lastTransactionAt: claimedAt },
   create: {
+    walletId,
+    walletNumber: walletNumberFor(walletId),
     beneficiaryId: beneficiary.beneficiaryId,
     balance: "1500.00",
     currency: "PHP",
@@ -244,6 +249,34 @@ for (const notice of [
     create: { ...notice, beneficiaryId: beneficiary.beneficiaryId, createdAt: notice.sentAt },
   });
 }
+
+// A second verified demo account with an empty simulated wallet, used as a transfer recipient.
+const recipient = await prisma.beneficiary.upsert({
+  where: { contactNumber: "+639175550148" },
+  update: { isVerified: true, status: "active" },
+  create: {
+    firstName: "Pedro",
+    lastName: "Santos",
+    birthDate: new Date("1979-03-02T00:00:00.000Z"),
+    sex: "male",
+    address: "8 Rizal Avenue",
+    barangayId: barangay.barangayId,
+    contactNumber: "+639175550148",
+    isVerified: true,
+    status: "active",
+  },
+});
+const recipientWalletId = randomUUID();
+const recipientWallet = await prisma.walletAccount.upsert({
+  where: { beneficiaryId: recipient.beneficiaryId },
+  update: {},
+  create: {
+    walletId: recipientWalletId,
+    walletNumber: walletNumberFor(recipientWalletId),
+    beneficiaryId: recipient.beneficiaryId,
+  },
+});
+console.info(`Demo wallets: ${wallet.walletNumber} (0917 555 0147), ${recipientWallet.walletNumber} (0917 555 0148)`);
 
 await prisma.$disconnect();
 console.info("Seeded the mobile beneficiary, schedule, completed claim, wallet history, and two demo notifications (existing read status preserved).");

@@ -10,19 +10,25 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import QRCode from 'react-native-qrcode-svg';
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
   Bell,
+  BookOpen,
   CalendarDays,
   Check,
   CircleCheck,
-  CircleHelp,
   Clock3,
   FileText,
   Info,
+  KeyRound,
+  ListChecks,
   MapPin,
-  MessageCircle,
   QrCode,
+  Receipt as ReceiptIcon,
   ScanFace,
+  Search,
   ShieldCheck,
+  Smartphone,
   Users,
 } from 'lucide-react-native';
 import {
@@ -30,15 +36,27 @@ import {
   BottomLinks,
   Button,
   Card,
+  Checklist,
+  Chip,
   DetailRow,
+  Divider,
+  EmptyState,
   Field,
   flow,
   go,
-  Logo,
+  GradientCard,
+  IconCircle,
+  KeyValue,
+  LoadingSkeleton,
   Notice,
+  NotificationCard,
   Page,
   PhoneField,
+  ScreenIntro,
+  SectionHeader,
   styles,
+  Timeline,
+  TransactionCard,
   Txt,
 } from '../components';
 import { appointment as a, peso, signedPeso, useDemo } from '../state';
@@ -52,8 +70,10 @@ import {
   formatDocumentType,
   formatTimeSlot,
   formatTransactionType,
+  formatClaimStatus,
+  transactionSource,
 } from '../format';
-import { s as mainStyles } from './main';
+import { claimProgress, ReceiptBody } from './main';
 
 export function DetailScreen() {
   const { page: screen } = useLocalSearchParams<{ page: string }>();
@@ -69,6 +89,15 @@ export function DetailScreen() {
     'qr-pass': {
       title: t('My QR claim pass', 'Akong QR claim pass'),
       content: <ClaimPass />,
+    },
+    programs: {
+      title: t('My programs', 'Akong mga programa'),
+      content: <Programs />,
+    },
+    'claim-status': {
+      title: t('Claim status', 'Kahimtang sa claim'),
+      content: <ClaimStatus />,
+      active: 'wallet',
     },
     transactions: {
       title: t('Transaction history', 'Kasaysayan sa transaksyon'),
@@ -158,7 +187,7 @@ export function DetailScreen() {
 function Schedule() {
   const { overview, overviewLoading, overviewError, refreshOverview, t } = useDemo();
   if (overviewLoading) {
-    return <Notice>{t('Loading your schedule…', 'Nag-load sa imong iskedyul…')}</Notice>;
+    return <LoadingSkeleton label={t('Loading your schedule…', 'Nag-load sa imong iskedyul…')} />;
   }
   if (overviewError) {
     return (
@@ -173,44 +202,65 @@ function Schedule() {
   const schedule = overview?.nextSchedule;
   if (!schedule) {
     return (
-      <>
-        <Notice>
-          {t(
-            'No claiming schedule has been assigned to your account yet.',
-            'Wala pay iskedyul sa claim nga gi-assign sa imong account.',
-          )}
-        </Notice>
+      <EmptyState
+        icon={CalendarDays}
+        title={t('No schedule yet', 'Wala pay iskedyul')}
+        body={t(
+          'No claiming schedule has been assigned to your account yet.',
+          'Wala pay iskedyul sa claim nga gi-assign sa imong account.',
+        )}
+      >
         <Button variant="outline" onPress={() => void refreshOverview()}>
           {t('Refresh schedule', 'I-refresh ang iskedyul')}
         </Button>
-      </>
+      </EmptyState>
     );
   }
   return (
     <>
-      <Badge>{formatStatus(schedule.status)}</Badge>
+      <ScreenIntro
+        icon={CalendarDays}
+        size={60}
+        title={t('Upcoming claim', 'Umaabot nga claim')}
+        subtitle={schedule.program.name}
+      />
+      <GradientCard style={{ gap: 14 }}>
+        <View style={[styles.row, { justifyContent: 'space-between', flexWrap: 'wrap' }]}>
+          <Txt variant="caption" style={{ color: '#D2E5FC' }}>
+            {t('CLAIMING DATE', 'PETSA SA PAG-CLAIM')}
+          </Txt>
+          <Badge tone="light">{formatStatus(schedule.status)}</Badge>
+        </View>
+        <Txt variant="heading" style={{ color: c.onPrimary, fontSize: 22, lineHeight: 28 }}>
+          {formatDate(schedule.date)}
+        </Txt>
+        <View style={[styles.row, { gap: 8 }]}>
+          <Clock3 size={18} color="#D2E5FC" />
+          <Txt style={{ color: c.onPrimary }}>{formatTimeSlot(schedule.slotStart, schedule.slotEnd)}</Txt>
+        </View>
+        <View style={{ backgroundColor: 'rgba(255,255,255,0.14)', borderRadius: 16, padding: 14, gap: 2 }}>
+          <Txt variant="caption" style={{ color: '#D2E5FC' }}>
+            {t('QUEUE NUMBER', 'NUMERO SA PILA')}
+          </Txt>
+          <Txt variant="number" style={{ color: c.onPrimary }}>
+            {formatQueueNumber(schedule.queueNumber)}
+          </Txt>
+        </View>
+      </GradientCard>
       <Card>
-        <DetailRow
-          icon={ShieldCheck}
-          label={t('Program', 'Programa')}
-          value={schedule.program.name}
-        />
-        <DetailRow
-          icon={CalendarDays}
-          label={t('Date', 'Petsa')}
-          value={formatDate(schedule.date)}
-        />
-        <DetailRow
-          icon={Clock3}
-          label={t('Time slot', 'Oras')}
-          value={formatTimeSlot(schedule.slotStart, schedule.slotEnd)}
-        />
-        <DetailRow
-          icon={Users}
-          label={t('Queue number', 'Numero sa pila')}
-          value={formatQueueNumber(schedule.queueNumber)}
-        />
+        <DetailRow icon={ShieldCheck} label={t('Program', 'Programa')} value={schedule.program.name} />
         <DetailRow icon={MapPin} label={t('Venue', 'Lugar')} value={schedule.location} />
+        <DetailRow icon={Users} label={t('Queue number', 'Numero sa pila')} value={formatQueueNumber(schedule.queueNumber)} />
+      </Card>
+      <SectionHeader title={t('Claiming instructions', 'Instruksyon sa pag-claim')} />
+      <Card>
+        <Checklist
+          items={[
+            { icon: 'check', text: t('Arrive only during your time slot.', 'Abot lamang sa imong oras.') },
+            { icon: 'check', text: t('Bring your phone with your QR claim pass.', 'Dad-a ang cellphone nga adunay QR claim pass.') },
+            { icon: 'check', text: t('Follow the instructions of your barangay facilitator.', 'Sunda ang instruksyon sa barangay facilitator.') },
+          ]}
+        />
       </Card>
       <Notice>
         {t(
@@ -289,7 +339,7 @@ function ClaimPass() {
     </Button>
   </>;
   if (loading || loadedToken.current !== accessToken) {
-    return <Notice>{t('Issuing your secure QR pass…', 'Gina-issue ang imong secure QR pass…')}</Notice>;
+    return <LoadingSkeleton label={t('Issuing your secure QR pass…', 'Gina-issue ang imong secure QR pass…')} lines={4} />;
   }
   if (error) {
     const unavailable = error.code === 'CLAIM_PASS_UNAVAILABLE';
@@ -304,6 +354,12 @@ function ClaimPass() {
     };
     return (
       <>
+        <ScreenIntro
+          icon={QrCode}
+          tone={unavailable ? 'amber' : 'error'}
+          size={60}
+          title={unavailable ? t('No QR pass yet', 'Wala pay QR pass') : t('QR pass unavailable', 'Dili magamit ang QR pass')}
+        />
         <Notice tone={unavailable ? 'warning' : 'error'}>
           {messages[error.code] ?? (error.status === 429
             ? t('Too many requests. Wait and refresh the pass later.', 'Daghan ra nga hangyo. Paghulat ug i-refresh ang pass unya.')
@@ -315,35 +371,54 @@ function ClaimPass() {
   }
   if (!pass) return null;
   if (expired || Date.parse(pass.expiresAt) <= Date.now()) return <>
+    <ScreenIntro icon={Clock3} tone="amber" size={60} title={t('Pass expired', 'Na-expire ang pass')} />
     <Notice tone="warning">{t('This pass has expired. Refresh to check availability, or contact staff about your schedule.', 'Na-expire na kini nga pass. I-refresh aron masusi kon magamit pa, o kontaka ang staff bahin sa imong iskedyul.')}</Notice>
     {actions}
   </>;
   return (
     <>
-      <Card style={{ alignItems: 'center' }}>
-        <Txt variant="label" style={{ textAlign: 'center', color: c.primary }}>
-          {pass.schedule.program.name}
-        </Txt>
-        <Txt variant="small">{formatDate(pass.schedule.date)}</Txt>
-        <View
-          style={{ padding: 12, backgroundColor: c.card }}
-          accessibilityLabel={t('Active QR claim pass', 'Aktibong QR claim pass')}
-        >
-          <QRCode
-            value={pass.claimCode}
-            size={200}
-            color={c.navy}
-            backgroundColor={c.card}
-          />
+      <Txt style={{ textAlign: 'center', color: c.muted }}>
+        {t(
+          'Present this QR code to authorized staff during your scheduled claiming.',
+          'Ipakita kini nga QR code sa awtorisadong staff sa imong iskedyul sa pag-claim.',
+        )}
+      </Txt>
+      <Card style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
+        <GradientCard style={{ borderRadius: 0, gap: 6, boxShadow: 'none' }}>
+          <View style={[styles.row, { justifyContent: 'space-between', flexWrap: 'wrap' }]}>
+            <Txt variant="caption" style={{ color: '#D2E5FC' }}>{t('CLAIM PASS', 'CLAIM PASS')}</Txt>
+            <Badge tone="light">{t('Active pass', 'Aktibong pass')}</Badge>
+          </View>
+          <Txt variant="label" style={{ color: c.onPrimary, fontSize: 17 }}>
+            {pass.schedule.program.name}
+          </Txt>
+          <Txt variant="small" style={{ color: '#D9E6FF' }}>{formatDate(pass.schedule.date)}</Txt>
+        </GradientCard>
+        <View style={{ alignItems: 'center', padding: 20, gap: 14 }}>
+          <View
+            style={{ padding: 14, backgroundColor: c.card, borderRadius: 20, borderWidth: 1, borderColor: c.outline }}
+            accessibilityLabel={t('Active QR claim pass', 'Aktibong QR claim pass')}
+          >
+            <QRCode value={pass.claimCode} size={210} color={c.navy} backgroundColor={c.card} />
+          </View>
+          <Divider dashed />
+          <View style={[styles.row, { alignSelf: 'stretch', justifyContent: 'space-between' }]}>
+            <View style={{ gap: 2 }}>
+              <Txt variant="caption">{t('QUEUE', 'PILA')}</Txt>
+              <Txt variant="number" style={{ color: c.navy, fontSize: 30, lineHeight: 36 }}>
+                {formatQueueNumber(pass.schedule.queueNumber)}
+              </Txt>
+            </View>
+            <View style={{ gap: 2, alignItems: 'flex-end', flexShrink: 1 }}>
+              <Txt variant="caption">{t('TIME', 'ORAS')}</Txt>
+              <Txt variant="label">{formatTimeSlot(pass.schedule.slotStart, pass.schedule.slotEnd)}</Txt>
+            </View>
+          </View>
+          <View style={[styles.row, { alignSelf: 'stretch', gap: 8 }]}>
+            <MapPin size={18} color={c.primary} />
+            <Txt variant="label" style={{ flex: 1 }}>{pass.schedule.location}</Txt>
+          </View>
         </View>
-        <Txt variant="number">{formatQueueNumber(pass.schedule.queueNumber)}</Txt>
-        <Txt variant="small">
-          {formatTimeSlot(pass.schedule.slotStart, pass.schedule.slotEnd)}
-        </Txt>
-        <Txt variant="label" style={{ textAlign: 'center' }}>
-          {pass.schedule.location}
-        </Txt>
-        <Badge tone="success">{t('Active pass', 'Aktibong pass')}</Badge>
       </Card>
       <Notice>
         {t(
@@ -358,11 +433,11 @@ function ClaimPass() {
 
 function Transactions() {
   const { wallet, walletLoading, walletError, refreshWallet, t } = useDemo();
-  const [selected, setSelected] = useState('');
+  const [filter, setFilter] = useState<'all' | 'credit' | 'reversal'>('all');
   const entries = wallet?.transactions ?? [];
-  const selectedId = entries.some((entry) => entry.id === selected)
-    ? selected
-    : (entries[0]?.id ?? '');
+  const visible = entries.filter((entry) =>
+    filter === 'all' ? true : filter === 'credit' ? entry.amount >= 0 : entry.amount < 0,
+  );
   return (
     <>
       <Notice>
@@ -372,16 +447,11 @@ function Transactions() {
         )}
       </Notice>
       {walletLoading && !wallet ? (
-        <Card>
-          <Txt variant="label">{t('Loading wallet records…', 'Nag-load sa wallet records…')}</Txt>
-        </Card>
+        <LoadingSkeleton label={t('Loading wallet records…', 'Nag-load sa wallet records…')} />
       ) : walletError ? (
         <>
           <Notice tone="error">
-            {t(
-              'Your wallet history could not be loaded.',
-              'Wala ma-load ang imong wallet history.',
-            )}
+            {t('Your wallet history could not be loaded.', 'Wala ma-load ang imong wallet history.')}
           </Notice>
           <Button variant="outline" onPress={() => void refreshWallet()}>
             {t('Try again', 'Sulayi pag-usab')}
@@ -389,79 +459,53 @@ function Transactions() {
         </>
       ) : (
         <>
-          <View style={mainStyles.balanceCard}>
-            <Txt variant="small" style={mainStyles.cardCaption}>
+          <GradientCard style={{ gap: 6 }}>
+            <Txt variant="caption" style={{ color: '#D2E5FC' }}>
               {t('RECORDED BALANCE', 'NAREKORD NGA BALANSE')}
             </Txt>
-            <Txt variant="heading" style={{ fontSize: 26, color: c.card }}>
+            <Txt variant="heading" style={{ fontSize: 28, lineHeight: 34, color: c.onPrimary }}>
               {wallet?.wallet ? peso(wallet.wallet.balance) : t('No wallet account yet', 'Wala pay wallet account')}
             </Txt>
+          </GradientCard>
+          <View accessibilityRole="tablist" style={[styles.row, { gap: 8, flexWrap: 'wrap' }]}>
+            <Chip label={t('All', 'Tanan')} selected={filter === 'all'} count={entries.length} onPress={() => setFilter('all')} />
+            <Chip label={t('Credits', 'Credits')} selected={filter === 'credit'} onPress={() => setFilter('credit')} />
+            <Chip label={t('Reversals', 'Pagbalik')} selected={filter === 'reversal'} onPress={() => setFilter('reversal')} />
           </View>
-          <Txt variant="small" style={{ fontFamily: fonts.semibold }}>
-            {t('RECENT TRANSACTIONS', 'BAG-ONG MGA TRANSAKSYON')}
-          </Txt>
-          {entries.length ? (
-            <Card style={{ gap: 0, paddingVertical: 4 }}>
-              {entries.map((entry, index) => (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: selectedId === entry.id }}
-                  onPress={() => setSelected(entry.id)}
+          {visible.length ? (
+            <Card style={{ gap: 0, paddingVertical: 2 }}>
+              {visible.map((entry, index) => (
+                <TransactionCard
                   key={entry.id}
-                  style={[
-                    mainStyles.transaction,
-                    index > 0 && { borderTopWidth: 1, borderTopColor: c.outline },
-                  ]}
-                >
-                  <View style={{ flex: 1, gap: 4 }}>
-                    <Txt variant="label">{formatTransactionType(entry.type, t)}</Txt>
-                    <Txt variant="small">
-                      {entry.program.name} · {formatDateTime(entry.createdAt)}
-                    </Txt>
-                    <Txt variant="small" style={{ fontSize: 10 }}>
-                      {entry.reference}
-                    </Txt>
-                    <Txt variant="small">{formatStatus(entry.status)}</Txt>
-                  </View>
-                  <Txt
-                    variant="small"
-                    style={{ color: entry.amount < 0 ? c.error : c.text, fontFamily: fonts.semibold }}
-                  >
-                    {signedPeso(entry.amount)}
-                  </Txt>
-                  {selectedId === entry.id && <Check size={18} color={c.primary} />}
-                </Pressable>
+                  first={index === 0}
+                  icon={entry.amount < 0 ? ArrowUpRight : ArrowDownLeft}
+                  negative={entry.amount < 0}
+                  title={formatTransactionType(entry.type, t)}
+                  subtitle={`${transactionSource(entry, t)} · ${formatDateTime(entry.createdAt)}`}
+                  meta={`${entry.reference} · ${formatStatus(entry.status)}`}
+                  amount={signedPeso(entry.amount)}
+                  accessibilityLabel={`${t('Open receipt', 'Ablihi ang resibo')}: ${formatTransactionType(entry.type, t)}, ${signedPeso(entry.amount)}, ${formatDateTime(entry.createdAt)}`}
+                  onPress={() => go('receipt', { id: entry.id })}
+                />
               ))}
             </Card>
           ) : (
-            <Card>
-              <Txt variant="label">{t('No wallet history yet', 'Wala pay wallet history')}</Txt>
-              <Txt variant="small">
-                {t(
-                  'Wallet credits appear here when staff record a ledger entry. Physical assistance appears in claim history.',
-                  'Makita dinhi ang wallet credits kon morekord ang staff. Ang pisikal nga ayuda makita sa kasaysayan sa claim.',
-                )}
-              </Txt>
-            </Card>
+            <EmptyState
+              icon={ReceiptIcon}
+              title={entries.length ? t('No matching records', 'Walay katugbang nga rekord') : t('No wallet history yet', 'Wala pay wallet history')}
+              body={t(
+                'Wallet credits appear here when staff record a ledger entry. Physical assistance appears in claim history.',
+                'Makita dinhi ang wallet credits kon morekord ang staff. Ang pisikal nga ayuda makita sa kasaysayan sa claim.',
+              )}
+            />
           )}
         </>
       )}
       {!walletError && (
-        <Button
-          variant="outline"
-          loading={walletLoading}
-          onPress={() => void refreshWallet()}
-        >
+        <Button variant="ghost" loading={walletLoading} onPress={() => void refreshWallet()}>
           {t('Refresh records', 'I-refresh ang records')}
         </Button>
       )}
-      <Button
-        variant="outline"
-        disabled={!selectedId}
-        onPress={() => go('receipt', { id: selectedId })}
-      >
-        {t('View selected receipt', 'Tan-awa ang napiling resibo')}
-      </Button>
     </>
   );
 }
@@ -470,11 +514,7 @@ function Receipt() {
   const { wallet, walletLoading, walletError, refreshWallet, t } = useDemo();
   const entry = wallet?.transactions.find((item) => item.id === id);
   if (walletLoading && !wallet)
-    return (
-      <Card>
-        <Txt variant="label">{t('Loading receipt…', 'Nag-load sa resibo…')}</Txt>
-      </Card>
-    );
+    return <LoadingSkeleton label={t('Loading receipt…', 'Nag-load sa resibo…')} />;
   if (walletError)
     return (
       <>
@@ -497,34 +537,9 @@ function Receipt() {
     );
   return (
     <>
-      <View style={styles.row}>
-        <CircleCheck color={c.green} size={40} />
-        <View>
-          <Txt variant="label">{formatTransactionType(entry.type, t)}</Txt>
-          <Txt variant="title" style={{ color: entry.amount < 0 ? c.error : c.green }}>
-            {signedPeso(entry.amount)}
-          </Txt>
-        </View>
-      </View>
-      <Card>
-        <DetailRow label={t('Program', 'Programa')} value={entry.program.name} />
-        <DetailRow label={t('Recorded', 'Girekord')} value={formatDateTime(entry.createdAt)} />
-        <DetailRow
-          label={t('Reference No.', 'Numero sa reperensya')}
-          value={entry.reference}
-        />
-        <DetailRow label={t('Status', 'Kahimtang')} value={formatStatus(entry.status)} />
-        <DetailRow
-          label={t('Claim status', 'Kahimtang sa claim')}
-          value={formatStatus(entry.claimStatus)}
-        />
+      <Card style={{ gap: 18 }}>
+        <ReceiptBody entry={entry} t={t} />
       </Card>
-      <Notice>
-        {t(
-          'This receipt is a recorded assistance entry. This app does not transfer funds.',
-          'Kini nga resibo usa ka rekord sa ayuda. Kini nga app dili magbalhin og kuwarta.',
-        )}
-      </Notice>
       <Button onPress={() => router.back()}>{t('Close', 'Sirad-i')}</Button>
     </>
   );
@@ -532,6 +547,7 @@ function Receipt() {
 
 function Notifications() {
   const { accessToken, notifications, notificationsLoading, notificationsError, refreshNotifications, t } = useDemo();
+  const [unreadOnly, setUnreadOnly] = useState(false);
   useEffect(() => { void refreshNotifications(); }, [accessToken]);
   const icons: Record<string, typeof Bell> = {
     schedule: CalendarDays,
@@ -539,68 +555,53 @@ function Notifications() {
     reminder: Bell,
     account: Info,
   };
+  const tones: Record<string, 'primary' | 'green' | 'amber' | 'navy'> = {
+    schedule: 'primary',
+    claim: 'green',
+    reminder: 'amber',
+    account: 'navy',
+  };
   if (!accessToken) return <Notice>{t('Sign in to view your notifications.', 'Pag-sign in para makita ang imong pahibalo.')}</Notice>;
+  const unreadCount = notifications.filter((notice) => !notice.readAt).length;
+  const visible = unreadOnly ? notifications.filter((notice) => !notice.readAt) : notifications;
   return (
     <>
-      {notificationsLoading && <Notice>{t('Loading notifications…', 'Nag-load sa mga pahibalo…')}</Notice>}
+      <View accessibilityRole="tablist" style={[styles.row, { gap: 8 }]}>
+        <Chip label={t('All', 'Tanan')} selected={!unreadOnly} count={notifications.length} onPress={() => setUnreadOnly(false)} />
+        <Chip label={t('Unread', 'Wala pa mabasa')} selected={unreadOnly} count={unreadCount} onPress={() => setUnreadOnly(true)} />
+      </View>
+      {notificationsLoading && <LoadingSkeleton label={t('Loading notifications…', 'Nag-load sa mga pahibalo…')} lines={2} />}
       {notificationsError && (
         <Notice tone="error">
           {t('Your notifications could not be loaded. Try again.', 'Wala ma-load ang imong mga pahibalo. Sulayi pag-usab.')}
         </Notice>
       )}
       {!notificationsLoading && !notificationsError && notifications.length === 0 && (
-        <Notice>{t('No notifications yet. Schedule and claim updates will appear here.', 'Wala pay pahibalo. Dinhi makita ang mga update sa iskedyul ug claim.')}</Notice>
+        <EmptyState
+          icon={Bell}
+          title={t('You are all caught up', 'Wala kay bag-ong pahibalo')}
+          body={t('No notifications yet. Schedule and claim updates will appear here.', 'Wala pay pahibalo. Dinhi makita ang mga update sa iskedyul ug claim.')}
+        />
       )}
-      <Button variant="outline" loading={notificationsLoading} onPress={() => void refreshNotifications()}>
+      {!notificationsLoading && !notificationsError && notifications.length > 0 && visible.length === 0 && (
+        <EmptyState icon={CircleCheck} tone="green" title={t('No unread notifications', 'Walay wala pa mabasa nga pahibalo')} />
+      )}
+      {visible.map((notice) => (
+        <NotificationCard
+          key={notice.id}
+          icon={icons[notice.notificationType] ?? Bell}
+          tone={tones[notice.notificationType] ?? 'primary'}
+          title={t(notice.title, notice.titleBs ?? notice.title)}
+          message={t(notice.message, notice.messageBs ?? notice.message)}
+          time={formatDateTime(notice.sentAt)}
+          unread={!notice.readAt}
+          accessibilityLabel={`${t(notice.title, notice.titleBs ?? notice.title)}. ${notice.readAt ? t('Read', 'Nabasa na') : t('Unread', 'Wala pa mabasa')}`}
+          onPress={() => go('notification-details', { id: notice.id })}
+        />
+      ))}
+      <Button variant="ghost" loading={notificationsLoading} onPress={() => void refreshNotifications()}>
         {notificationsError ? t('Try again', 'Sulayi pag-usab') : t('Refresh notifications', 'I-refresh ang mga pahibalo')}
       </Button>
-      {notifications.map((notice) => {
-        const Icon = icons[notice.notificationType] ?? Bell;
-        return (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${t(notice.title, notice.titleBs ?? notice.title)}. ${notice.readAt ? t('Read', 'Nabasa na') : t('Unread', 'Wala pa mabasa')}`}
-            key={notice.id}
-            onPress={() => go('notification-details', { id: notice.id })}
-          >
-            <Card style={{ padding: 16, gap: 8 }}>
-              <View style={[styles.row, { alignItems: 'flex-start' }]}>
-                <Icon
-                  size={19}
-                  color={
-                    notice.notificationType === 'claim'
-                      ? c.green
-                      : notice.notificationType === 'reminder'
-                        ? c.amber
-                        : c.primary
-                  }
-                />
-                <View style={{ flex: 1, gap: 6 }}>
-                  <View style={styles.row}>
-                    <Txt variant="label" style={{ flex: 1 }}>
-                      {t(notice.title, notice.titleBs ?? notice.title)}
-                    </Txt>
-                    {!notice.readAt && (
-                      <View
-                        style={{
-                          width: 7,
-                          height: 7,
-                          borderRadius: 4,
-                          backgroundColor: c.primary,
-                        }}
-                      />
-                    )}
-                  </View>
-                  <Txt variant="small">{t(notice.message, notice.messageBs ?? notice.message)}</Txt>
-                  <Txt variant="small">
-                    {formatDateTime(notice.sentAt)}
-                  </Txt>
-                </View>
-              </View>
-            </Card>
-          </Pressable>
-        );
-      })}
     </>
   );
 }
@@ -639,7 +640,7 @@ function NotificationDetails() {
     return () => { active = false; };
   }, [notice?.id, accessToken, readAttempt]);
   if (!accessToken) return <Notice>{t('Sign in to view your notifications.', 'Pag-sign in para makita ang imong pahibalo.')}</Notice>;
-  if (!notice && (notificationsLoading || lookingUp)) return <Notice>{t('Loading notifications…', 'Nag-load sa mga pahibalo…')}</Notice>;
+  if (!notice && (notificationsLoading || lookingUp)) return <LoadingSkeleton label={t('Loading notifications…', 'Nag-load sa mga pahibalo…')} lines={2} />;
   if (!notice && notificationsError) return (
     <>
       <Notice tone="error">{t('Your notifications could not be loaded.', 'Wala ma-load ang imong mga pahibalo.')}</Notice>
@@ -648,17 +649,25 @@ function NotificationDetails() {
   );
   if (!notice)
     return (
-      <Notice>{t('Notification unavailable.', 'Dili magamit nga pahibalo.')}</Notice>
+      <EmptyState icon={Bell} title={t('Notification unavailable.', 'Dili magamit nga pahibalo.')} />
     );
+  const DetailIcon = notice.notificationType === 'claim' ? CircleCheck : notice.notificationType === 'schedule' ? CalendarDays : Bell;
   return (
     <>
-      <Badge tone={notice.readAt ? 'success' : 'warning'}>
-        {notice.readAt ? t('Read', 'Nabasa na') : t('Unread', 'Wala pa mabasa')}
-      </Badge>
-      <Txt variant="title">{t(notice.title, notice.titleBs ?? notice.title)}</Txt>
-      <Txt variant="small">{formatDateTime(notice.sentAt)}</Txt>
-      <Card>
-        <Txt>{t(notice.message, notice.messageBs ?? notice.message)}</Txt>
+      <Card style={{ gap: 14 }}>
+        <View style={[styles.row, { justifyContent: 'space-between' }]}>
+          <IconCircle icon={DetailIcon} size={52} square tone={notice.notificationType === 'claim' ? 'green' : notice.notificationType === 'reminder' ? 'amber' : 'primary'} />
+          <Badge tone={notice.readAt ? 'success' : 'warning'}>
+            {notice.readAt ? t('Read', 'Nabasa na') : t('Unread', 'Wala pa mabasa')}
+          </Badge>
+        </View>
+        <Txt accessibilityRole="header" variant="title" style={{ fontSize: 22, lineHeight: 28 }}>{t(notice.title, notice.titleBs ?? notice.title)}</Txt>
+        <View style={[styles.row, { gap: 6 }]}>
+          <Clock3 size={15} color={c.muted} />
+          <Txt variant="small">{formatDateTime(notice.sentAt)}</Txt>
+        </View>
+        <Divider />
+        <Txt selectable>{t(notice.message, notice.messageBs ?? notice.message)}</Txt>
       </Card>
       {saving && <Txt variant="small">{t('Saving read status…', 'Gitipigan ang kahimtang sa pagbasa…')}</Txt>}
       {readError && (
@@ -687,18 +696,14 @@ function Recovery() {
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   return (
     <>
-      <View style={{ alignItems: 'center', gap: 12, paddingVertical: 12 }}>
-        <ShieldCheck size={34} color={c.primary} />
-        <Txt variant="heading">
-          {t('Recover your account', 'Irecover ang imong account')}
-        </Txt>
-        <Txt variant="small" style={{ textAlign: 'center' }}>
-          {t(
-            'Enter the mobile number linked to your beneficiary account.',
-            'Isulod ang numero nga nalambigit sa imong beneficiary account.',
-          )}
-        </Txt>
-      </View>
+      <ScreenIntro
+        icon={KeyRound}
+        title={t('Recover your account', 'Irecover ang imong account')}
+        subtitle={t(
+          'Enter the mobile number linked to your beneficiary account.',
+          'Isulod ang numero nga nalambigit sa imong beneficiary account.',
+        )}
+      />
       <PhoneField
         value={value}
         onChangeText={(s) => {
@@ -745,6 +750,9 @@ function Recovery() {
         }}
       >
         {t('Send verification code', 'Ipadala ang verification code')}
+      </Button>
+      <Button variant="outline" icon={KeyRound} disabled={sending} onPress={() => router.push('/account/forgot-password')}>
+        {t('Reset my password instead', 'I-reset hinuon ang password')}
       </Button>
       <Button variant="outline" onPress={() => router.replace('/flow/login')}>
         {t('Back to login', 'Balik sa login')}
@@ -897,19 +905,32 @@ function ProfileForm({ beneficiary }: { beneficiary: Beneficiary }) {
   );
 }
 function Password() {
-  const { t } = useDemo();
+  const { beneficiary, t } = useDemo();
   return (
     <>
-      <Logo size={38} />
-      <Txt variant="title">{t('Secure your account', 'Siguroha ang imong account')}</Txt>
+      <ScreenIntro
+        icon={ShieldCheck}
+        title={t('Secure your account', 'Siguroha ang imong account')}
+        subtitle={t(
+          'GarantiyAid signs you in with a one-time code sent to your registered mobile number.',
+          'Ang GarantiyAid mogamit og one-time code nga ipadala sa imong rehistradong numero aron makasulod.',
+        )}
+      />
+      <Card>
+        <DetailRow icon={Smartphone} label={t('Sign-in method', 'Paagi sa pagsulod')} value={t('Mobile number + 6-digit code', 'Numero + 6 ka numero nga code')} />
+        <DetailRow icon={KeyRound} label={t('Password', 'Password')} value={beneficiary?.hasPassword ? t('Set', 'Naa na') : t('Not set yet', 'Wala pa')} />
+      </Card>
       <Notice>
         {t(
-          'This design uses phone-number login codes. Password changes will be available if your team adds password authentication to the backend.',
-          'Kini nga design naggamit sa phone login codes. Magamit ang pag-usab sa password kon idugang sa backend.',
+          'You can always sign in with a code. A password is optional and lets you sign in without waiting for a code.',
+          'Makasulod ka gihapon gamit ang code. Opsyonal ang password ug makasulod ka nga dili maghulat og code.',
         )}
       </Notice>
-      <Button onPress={() => go('reset-password')}>
-        {t('Recover my account', 'Irecover akong account')}
+      <Button icon={KeyRound} onPress={() => router.push('/account/password')}>
+        {t('Set or change password', 'Paghimo o usba ang password')}
+      </Button>
+      <Button variant="outline" onPress={() => router.push('/account/forgot-password')}>
+        {t('Forgot password', 'Nakalimot sa password')}
       </Button>
     </>
   );
@@ -917,7 +938,7 @@ function Password() {
 function EnrollmentStatus() {
   const { overview, overviewLoading, overviewError, refreshOverview, t } = useDemo();
   if (overviewLoading) {
-    return <Notice>{t('Loading your enrollment…', 'Nag-load sa imong enrollment…')}</Notice>;
+    return <LoadingSkeleton label={t('Loading your enrollment…', 'Nag-load sa imong enrollment…')} />;
   }
   if (overviewError) {
     return (
@@ -969,9 +990,12 @@ function EnrollmentStatus() {
                 { justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' },
               ]}
             >
-              <Txt variant="label" style={{ flex: 1, minWidth: 140 }}>
-                {enrollment.program.name}
-              </Txt>
+              <View style={[styles.row, { flex: 1, minWidth: 160 }]}>
+                <IconCircle icon={BookOpen} size={40} square tone={approved ? 'green' : rejected ? 'error' : 'amber'} />
+                <Txt variant="label" style={{ flex: 1 }}>
+                  {enrollment.program.name}
+                </Txt>
+              </View>
               <Badge tone={approved ? 'success' : rejected ? 'error' : 'warning'}>
                 {statusLabels[enrollment.status] ?? formatStatus(enrollment.status)}
               </Badge>
@@ -1224,8 +1248,10 @@ function Exception({ kind }: { kind: 'schedule' | 'expired' }) {
   const item = definitions[kind];
   return (
     <>
-      <Badge tone={item.tone}>{item.badge}</Badge>
-      <Txt variant="title">{item.title}</Txt>
+      <ScreenIntro icon={kind === 'schedule' ? CalendarDays : QrCode} tone={kind === 'schedule' ? 'amber' : 'error'} size={60} title={item.title} />
+      <View style={{ alignItems: 'center' }}>
+        <Badge tone={item.tone}>{item.badge}</Badge>
+      </View>
       <Notice tone={item.tone}>{item.body}</Notice>
       {kind === 'schedule' && (
         <Card>
@@ -1250,18 +1276,194 @@ function FaceLogin() {
   const { t } = useDemo();
   return (
     <>
-      <View style={{ alignItems: 'center', gap: 20, paddingVertical: 24 }}>
-        <ScanFace size={72} color={c.primary} />
-        <Txt variant="title">{t('Login with Face', 'Log in pinaagi sa Nawong')}</Txt>
-      </View>
+      <ScreenIntro
+        icon={ScanFace}
+        tone="neutral"
+        title={t('Login with Face', 'Log in pinaagi sa Nawong')}
+        subtitle={t('Not available yet', 'Dili pa magamit')}
+      />
       <Notice>
         {t(
           'Face login requires the biometric service and authentication API. Use the demo phone login to explore the app.',
           'Kinahanglan ang biometric service ug authentication API. Gamita ang demo phone login aron masulayan ang app.',
         )}
       </Notice>
-      <Button onPress={() => router.replace('/flow/login')}>
+      <Button icon={Smartphone} onPress={() => router.replace('/flow/login')}>
         {t('Use phone number', 'Gamita ang numero')}
+      </Button>
+    </>
+  );
+}
+
+const enrollmentLabels = (t: (en: string, bs: string) => string): Record<string, string> => ({
+  pending: t('Pending', 'Naghulat'),
+  for_validation: t('For validation', 'Alang sa validation'),
+  needs_correction: t('Needs correction', 'Kinahanglan og pagtul-id'),
+  approved: t('Approved', 'Giaprobahan'),
+  active: t('Active', 'Aktibo'),
+  rejected: t('Rejected', 'Gisalikway'),
+  suspended: t('Suspended', 'Gisuspenso'),
+  withdrawn: t('Withdrawn', 'Gibawi'),
+});
+
+/** Programs this beneficiary is enrolled in. The backend does not publish a general program catalog yet. */
+function Programs() {
+  const { overview, overviewLoading, overviewError, refreshOverview, t } = useDemo();
+  const [filter, setFilter] = useState<'all' | 'active' | 'review'>('all');
+  const [query, setQuery] = useState('');
+  if (overviewLoading && !overview) return <LoadingSkeleton label={t('Loading your programs…', 'Nag-load sa imong mga programa…')} />;
+  if (overviewError)
+    return (
+      <>
+        <Notice tone="error">{t('Your programs could not be loaded.', 'Wala ma-load ang imong mga programa.')}</Notice>
+        <Button onPress={() => void refreshOverview()}>{t('Try again', 'Sulayi pag-usab')}</Button>
+      </>
+    );
+  const labels = enrollmentLabels(t);
+  const enrollments = overview?.enrollments ?? [];
+  const isActive = (status: string) => status === 'approved' || status === 'active';
+  const visible = enrollments.filter((item) => {
+    if (filter === 'active' && !isActive(item.status)) return false;
+    if (filter === 'review' && isActive(item.status)) return false;
+    const text = `${item.program.name} ${item.program.code} ${item.program.description ?? ''}`.toLocaleLowerCase();
+    return text.includes(query.trim().toLocaleLowerCase());
+  });
+  return (
+    <>
+      <Txt style={{ color: c.muted }}>
+        {t(
+          'Government assistance programs linked to your beneficiary account.',
+          'Mga programa sa ayuda nga nalambigit sa imong beneficiary account.',
+        )}
+      </Txt>
+      {enrollments.length > 3 && (
+        <Field
+          label={t('Search programs', 'Pangitaa ang programa')}
+          value={query}
+          onChangeText={setQuery}
+          icon={Search}
+          placeholder={t('Program name or code', 'Ngalan o code sa programa')}
+        />
+      )}
+      <View accessibilityRole="tablist" style={[styles.row, { gap: 8, flexWrap: 'wrap' }]}>
+        <Chip label={t('All', 'Tanan')} selected={filter === 'all'} count={enrollments.length} onPress={() => setFilter('all')} />
+        <Chip label={t('Active', 'Aktibo')} selected={filter === 'active'} onPress={() => setFilter('active')} />
+        <Chip label={t('In review', 'Gisusi')} selected={filter === 'review'} onPress={() => setFilter('review')} />
+      </View>
+      {visible.length === 0 ? (
+        <EmptyState
+          icon={BookOpen}
+          title={enrollments.length ? t('No matching programs', 'Walay katugbang nga programa') : t('No programs yet', 'Wala pay programa')}
+          body={t(
+            'Programs appear here after a facilitator enrolls you. Contact staff if you expected to see one.',
+            'Makita dinhi ang programa human ka i-enroll sa facilitator. Kontaka ang staff kon naa kay gipaabot.',
+          )}
+        >
+          <Button variant="outline" onPress={() => go('support')}>{t('Contact staff', 'Kontaka ang staff')}</Button>
+        </EmptyState>
+      ) : (
+        visible.map((enrollment) => {
+          const active = isActive(enrollment.status);
+          const rejected = enrollment.status === 'rejected';
+          return (
+            <Pressable
+              key={enrollment.id}
+              accessibilityRole="button"
+              accessibilityLabel={`${enrollment.program.name}. ${labels[enrollment.status] ?? formatStatus(enrollment.status)}`}
+              onPress={() => go('enrollment-status')}
+            >
+              <Card style={{ gap: 12 }}>
+                <View style={[styles.row, { alignItems: 'flex-start' }]}>
+                  <IconCircle icon={BookOpen} size={46} square tone={active ? 'green' : rejected ? 'error' : 'amber'} />
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Txt variant="label">{enrollment.program.name}</Txt>
+                    <Txt variant="small">{enrollment.program.code}</Txt>
+                  </View>
+                  <Badge tone={active ? 'success' : rejected ? 'error' : 'warning'}>
+                    {labels[enrollment.status] ?? formatStatus(enrollment.status)}
+                  </Badge>
+                </View>
+                {enrollment.program.description ? (
+                  <Txt variant="small" numberOfLines={3}>{enrollment.program.description}</Txt>
+                ) : null}
+                <View style={[styles.row, { justifyContent: 'space-between' }]}>
+                  <Txt variant="small">{t('Grant amount', 'Kantidad sa ayuda')}</Txt>
+                  <Txt variant="label">
+                    {enrollment.program.grantAmount == null ? t('Not specified', 'Wala gitakda') : peso(enrollment.program.grantAmount)}
+                  </Txt>
+                </View>
+              </Card>
+            </Pressable>
+          );
+        })
+      )}
+      <Notice>
+        {t(
+          'A public catalog of all programs is not available yet. This list shows only your saved enrollments.',
+          'Wala pay publikong listahan sa tanang programa. Kini nga listahan nagpakita lamang sa imong natipig nga enrollment.',
+        )}
+      </Notice>
+      <Button variant="ghost" loading={overviewLoading} onPress={() => void refreshOverview()}>
+        {t('Refresh programs', 'I-refresh ang mga programa')}
+      </Button>
+    </>
+  );
+}
+
+/** Registered → enrollment approved → scheduled → claimed, from saved records only. */
+function ClaimStatus() {
+  const { beneficiary, overview, overviewLoading, overviewError, refreshOverview, wallet, walletLoading, walletError, refreshWallet, t } = useDemo();
+  const loading = (overviewLoading && !overview) || (walletLoading && !wallet);
+  const steps = claimProgress(t, beneficiary, overview, wallet);
+  const current = wallet?.currentClaim;
+  return (
+    <>
+      <ScreenIntro
+        icon={ListChecks}
+        tone="green"
+        size={60}
+        title={t('Your claim progress', 'Pag-uswag sa imong claim')}
+        subtitle={t('Each step updates when staff save a decision.', 'Ma-update ang matag lakang kon motipig ang staff og desisyon.')}
+      />
+      {loading ? (
+        <LoadingSkeleton label={t('Loading your claim status…', 'Nag-load sa kahimtang sa claim…')} lines={4} />
+      ) : (
+        <Card>
+          <Timeline steps={steps} />
+        </Card>
+      )}
+      {(overviewError || walletError) && (
+        <>
+          <Notice tone="error">
+            {t(
+              'Some records could not be loaded, so later steps may be missing. Try again.',
+              'Pipila ka rekord wala ma-load, busa basin kulang ang ubang lakang. Sulayi pag-usab.',
+            )}
+          </Notice>
+        </>
+      )}
+      {current ? (
+        <Card>
+          <View style={[styles.row, { justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }]}>
+            <Txt variant="label" style={{ flexShrink: 1 }}>{current.program.name}</Txt>
+            <Badge tone={['claimed', 'completed'].includes(current.status) ? 'success' : ['rejected', 'voided'].includes(current.status) ? 'error' : 'warning'}>
+              {formatClaimStatus(current.status, t, current.deliveryMode)}
+            </Badge>
+          </View>
+          <KeyValue label={t('Schedule', 'Iskedyul')} value={formatDate(current.date)} />
+          <KeyValue label={t('Recorded value', 'Narekord nga kantidad')} value={peso(current.amount)} />
+          {current.receipt ? <KeyValue label={t('Receipt number', 'Numero sa resibo')} value={current.receipt.number} /> : null}
+        </Card>
+      ) : null}
+      <Button
+        variant="outline"
+        loading={overviewLoading || walletLoading}
+        onPress={() => { void refreshOverview(); void refreshWallet(); }}
+      >
+        {t('Refresh status', 'I-refresh ang status')}
+      </Button>
+      <Button variant="ghost" icon={FileText} onPress={() => go('transactions')}>
+        {t('View transaction history', 'Tan-awa ang kasaysayan')}
       </Button>
     </>
   );

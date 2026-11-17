@@ -2,17 +2,23 @@
 name: GarantiyAid
 description: The implemented Figma-led mobile beneficiary interface.
 colors:
-  primary: "#155596"
+  primary: "#1652C5"
+  primaryPressed: "#0F44A8"
   onPrimary: "#FFFFFF"
-  primarySoft: "#EAF3FF"
-  navy: "#101F35"
-  green: "#117D65"
-  greenSoft: "#DDF9EC"
-  surface: "#F8FAFC"
+  primarySoft: "#EAF2FF"
+  primaryTint: "#D6E5FF"
+  navy: "#102A56"
+  accent: "#27B8E8"
+  accentSoft: "#E3F6FD"
+  green: "#16A57A"
+  greenInk: "#0E7C5B"
+  greenSoft: "#E3F7EF"
+  surface: "#F7F9FC"
   card: "#FFFFFF"
-  text: "#172233"
-  muted: "#596575"
-  outline: "#DDE3EA"
+  text: "#172B4D"
+  muted: "#64748B"
+  subtle: "#94A3B8"
+  outline: "#E2E8F0"
   amber: "#8C6414"
   amberSoft: "#FFF6D9"
   error: "#B3313D"
@@ -142,7 +148,15 @@ components:
 
 # Design System: GarantiyAid
 
+> **November 17, 2026 redesign.** The palette above replaces the earlier Figma-derived values with the blue-and-white government fintech direction: primary blue `#1652C5`, navy `#102A56`, accent `#27B8E8`, and success green `#16A57A` (icons and fills; `greenInk` `#0E7C5B` for text and filled buttons, which keeps white-on-green above 4.5:1). Cards use an 18 dp radius with soft `boxShadow` elevation, gradient hero surfaces use `GradientCard`, and body text increased to 15 dp (small text 13 dp) for older beneficiaries. All tokens live in `mobile/src/theme.ts`; the shared components in `mobile/src/components.tsx` are the reference implementation. Sections below that cite the older hex values describe the previous version.
+
 ## Overview
+
+### November 17 UI refinement
+
+The welcome screen now uses a compact shield wordmark, EN/BS language control, left-aligned introduction, and three divided feature rows. The create-account action stays in the footer while the content scrolls on shorter phones. Home separates the brand/language row from the beneficiary identity, and its schedule card emphasizes date, venue, queue number, and QR action. Quick-action grids use three flexible columns with an 80 dp minimum; longer labels can wrap.
+
+Shared section headings are 18 dp, headers use a white surface and bottom separator, badges stay within their container, and transaction amounts use tabular numerals with a bounded width. Help uses 48 dp action targets, compact rounded controls, and a shorter header title. Its first view starts at the top; later messages scroll into view. The existing blue/green palette, account workflows, and backend contracts are retained.
 
 **Creative North Star: "User-pinned GarantiyAid mobile reference"**
 
