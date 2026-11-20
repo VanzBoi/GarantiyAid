@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readSmsSettings } from "./sms.ts";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -28,7 +29,13 @@ if (faceRemote) {
   }
 }
 
+const sms = readSmsSettings();
+if (sms.provider === "development" && process.env.NODE_ENV === "production") {
+  console.warn("SMS_PROVIDER is not set: verification codes are neither shown nor sent. Set SMS_PROVIDER=semaphore.");
+}
+
 export const config = {
+  sms,
   faceMode,
   faceRemote,
   nodeEnv: process.env.NODE_ENV ?? "development",

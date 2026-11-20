@@ -16,6 +16,8 @@ function loadSource(file, mocks, globals = {}) {
     ...globals,
     exports,
     require: (name) => {
+      // The program catalog has no imports, so screens use the real one unless a test overrides it.
+      if (name === '../programs' && !(name in mocks)) return loadSource('programs.ts', {});
       if (name === './biometrics') return { BiometricSummary: 'BiometricSummary', BiometricPrivacy: 'BiometricPrivacy', BiometricConsentScreen: 'BiometricConsentScreen', BiometricEnrollmentScreen: 'BiometricEnrollmentScreen' };
       if (name === './support') return { SupportContent: 'SupportContent' };
       if (name === './document-checklist') return { DocumentChecklist: 'DocumentChecklist' };
@@ -25,6 +27,9 @@ function loadSource(file, mocks, globals = {}) {
       if (name === '../barangay-picker') return { BarangayPicker: 'BarangayPicker' };
       if (name === '../birth-date-picker') return { BirthDatePicker: 'BirthDatePicker' };
       assert.ok(name in mocks, `Unexpected import: ${name}`);
+      // Screens may memoize callbacks or refresh on focus; tests render once, so these are no-ops.
+      if (name === 'react') return { useCallback: (callback) => callback, ...mocks.react };
+      if (name === 'expo-router') return { useFocusEffect: () => {}, ...mocks['expo-router'] };
       return mocks[name];
     },
   });
@@ -406,6 +411,49 @@ test('document checklists handle pagination, stale responses, selection and curr
   button('Refresh checklists').props.onPress(); await new Promise(setImmediate); assert.equal(resets, 1); cleanup();
 });
 
+test('Help asks the AI assistant with the conversation and falls back to saved-record answers when it is unavailable', async () => {
+  for (const outcome of ['reply', 'unavailable', 'offline']) {
+    let cursor = 0; const slots = [], calls = [], saved = [];
+    const state = { t: (en) => en, language: 'bs', accessToken: 'session', overview: { nextSchedule: null }, overviewError: false,
+      overviewLoading: false, wallet: null, walletError: false, saveChat: (messages) => saved.push(...messages) };
+    const components = new Proxy({}, { get: (_, key) => String(key) });
+    const source = loadSource('screens/help.tsx', {
+      react: { createElement: (type, props, ...children) => ({ type, props, children }),
+        useState: initial => { const index = cursor++; if (!(index in slots)) slots[index] = initial; return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; },
+        useRef: initial => { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; } },
+      'react-native': { ...Object.fromEntries(['View', 'Pressable', 'ScrollView', 'TextInput', 'KeyboardAvoidingView', 'ActivityIndicator'].map(name => [name, name])), StyleSheet: { create: value => value }, Platform: { OS: 'web' } },
+      'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }, 'lucide-react-native': components, '../components': components,
+      '../theme': { colors: {} }, '../state': { useDemo: () => state }, '../format': {},
+      '../api': {
+        ApiRequestError, isUnavailableOnServer: () => false,
+        askAssistant: async (token, messages, language) => {
+          calls.push({ token, messages, language });
+          if (outcome === 'unavailable') throw new ApiRequestError(503, undefined, 'ASSISTANT_UNAVAILABLE');
+          if (outcome === 'offline') throw new Error('Network request failed');
+          return { text: 'Ang 4Ps kay programa sa DSWD para sa kabus nga pamilya.' };
+        },
+      },
+    });
+    const render = () => { cursor = 0; return source.HelpScreen(); };
+    const nodes = node => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === 'object' ? [node, ...nodes(node.children ?? [])] : [];
+    nodes(render()).find(node => node.type === 'TextInput').props.onChangeText('Unsa ang 4Ps?');
+    await nodes(render()).find(node => node.props?.accessibilityLabel === 'Send message').props.onPress();
+    const content = JSON.stringify(render());
+    assert.equal(calls.length, 1, outcome);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), { token: 'session', language: 'bs', messages: [{ role: 'user', text: 'Unsa ang 4Ps?' }] });
+    if (outcome === 'reply') {
+      assert.ok(content.includes('Ang 4Ps kay programa sa DSWD'));
+      assert.deepEqual(saved.map(m => m.role), ['user', 'assistant']);
+    } else if (outcome === 'unavailable') {
+      assert.ok(content.includes('Home and My programs show the programs saved on your account'));
+      assert.ok(content.includes('Basic answers from your records'));
+    } else {
+      assert.ok(content.includes('Check your internet connection'));
+      assert.equal(saved.length, 0, 'A failed answer is not saved to chat history');
+    }
+  }
+});
+
 test('Help distinguishes unavailable, loading and confirmed empty schedules and claims in EN and BS', () => {
   for (const language of ['en', 'bs']) for (const scenario of ['schedule-error', 'schedule-loading', 'schedule-empty', 'claim-error', 'claim-loading']) {
     let cursor = 0; const slots = [];
@@ -415,9 +463,10 @@ test('Help distinguishes unavailable, loading and confirmed empty schedules and 
     const source = loadSource('screens/help.tsx', {
       react: { createElement: (type, props, ...children) => ({ type, props, children }),
         useState: initial => { const index = cursor++; if (!(index in slots)) slots[index] = initial; return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; }, useRef: () => ({ current: null }) },
-      'react-native': { ...Object.fromEntries(['View', 'Pressable', 'ScrollView', 'TextInput', 'KeyboardAvoidingView'].map(name => [name, name])), StyleSheet: { create: value => value }, Platform: { OS: 'web' } },
+      'react-native': { ...Object.fromEntries(['View', 'Pressable', 'ScrollView', 'TextInput', 'KeyboardAvoidingView', 'ActivityIndicator'].map(name => [name, name])), StyleSheet: { create: value => value }, Platform: { OS: 'web' } },
       'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }, 'lucide-react-native': components, '../components': components,
       '../theme': { colors: {} }, '../state': { useDemo: () => state }, '../format': {},
+      '../api': { ApiRequestError, askAssistant: async () => { throw new Error('Signed-out help must not call the AI'); }, isUnavailableOnServer: () => false },
     });
     const render = () => { cursor = 0; return source.HelpScreen(); };
     const nodes = node => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === 'object' ? [node, ...nodes(node.children ?? [])] : [];
@@ -484,7 +533,7 @@ test('consent UI saves once before continuing, offers a harmless skip, and trans
         return [slots[index], value => { slots[index] = value; }]; }, useRef: initial => { const index = cursor++;
         if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; } };
     const components = new Proxy({}, { get: (_, key) => key === 'flow' ? step => { navigation = step; } : String(key) });
-    const source = loadSource('screens/biometrics.tsx', { react, 'expo-router': { router: { replace: route => { navigation = route; } } },
+    const source = loadSource('screens/biometrics.tsx', { react, 'expo-router': { router: { replace: route => { navigation = route; } }, useLocalSearchParams: () => ({}) },
       '../components': components, '../state': { useDemo: () => state }, '../api': { ApiRequestError }, '../format': { formatDateTime: value => value } });
     const render = () => { cursor = 0; return source.BiometricConsentScreen(); };
     const nodes = node => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === 'object' ? [node, ...nodes(node.children ?? [])] : [];
@@ -506,16 +555,33 @@ const overview = (id) => ({ enrollments: [{ id }], nextSchedule: null });
 const wallet = (id) => ({ wallet: { id, balance: 1500 }, currentClaim: null, claims: [], transactions: [] });
 const document = (id) => ({ id, docType: 'proof_of_residency', originalName: `${id}.pdf`, mimeType: 'application/pdf', sizeBytes: 30, status: 'received', createdAt: '2026-10-20T01:00:00Z' });
 
+function loginUsesPassword() {
+  const components = new Proxy({}, { get: (_, key) => key === 'flow' ? () => {} : String(key) });
+  const source = loadSource('screens/entry.tsx', {
+    react: { createElement: (type, props, ...children) => ({ type, props, children }), useState: (v) => [v, () => {}], useRef: (v) => ({ current: v }), useEffect: () => {} },
+    'react-native': { StyleSheet: { create: (styles) => styles }, TextInput: 'TextInput' },
+    'expo-router': { useLocalSearchParams: () => ({ step: 'login' }), router: {} },
+    'expo-camera': {}, 'expo-status-bar': {}, 'lucide-react-native': components, '../components': components, '../theme': { colors: {}, fonts: {} },
+    '../state': { useDemo: () => ({ t: (en) => en }) }, '../password': {}, './login': { LoginScreen: 'LoginScreen' },
+    './program-step': {}, './valid-id': {}, '../api': { ApiRequestError },
+  });
+  assert.equal(source.EntryFlow().type, 'LoginScreen');
+}
+
 test('existing accounts finish signup through the correct login or registration verification', async () => {
   for (const scenario of ['verified-signup', 'pending-signup', 'login']) {
-    let cursor = 0, navigation, destination, session;
+    // Log in is now number + password; the old code login screen is gone.
+    if (scenario === 'login') { loginUsesPassword(); continue; }
+    let cursor = 0, navigation, destination, session, savedIdWith, passwordSet, savedProgramWith;
+    const order = [];
     let params = { step: scenario === 'login' ? 'login' : 'mobile-number' };
     const slots = [], requests = [], gate = deferred();
     const state = {
       phone: '9175550999', setPhone: (phone) => { state.phone = phone; }, t: (en) => en,
       registration: { firstName: 'Test', lastName: 'Beneficiary', birthDate: '2000-02-29',
-        sex: 'Female', address: '12 Test Street', barangayId: 'test-area' },
-      startSession: async (token, owner) => { session = { token, owner }; },
+        sex: 'Female', address: '12 Test Street', barangayId: 'test-area', password: 'Sample2026' },
+      setRegistration: (value) => { Object.assign(state.registration, value); },
+      startSession: async (token, owner) => { session = { token, owner }; order.push('session'); },
     };
     const useState = (initial) => {
       const index = cursor++;
@@ -533,8 +599,14 @@ test('existing accounts finish signup through the correct login or registration 
       'expo-camera': {}, 'expo-status-bar': {}, 'lucide-react-native': components,
       '../components': components, '../theme': { colors: {}, fonts: {} },
       '../state': { useDemo: () => state },
+      '../password': { meetsPasswordRules: (value) => value.length >= 8, StrengthMeter: 'StrengthMeter' },
+      './login': { LoginScreen: 'LoginScreen' },
+      './program-step': { ProgramStep: () => null, saveRegistrationProgram: async (token) => { savedProgramWith = token; order.push('program'); return true; } },
+      './valid-id': { REGISTRATION_STEPS: 6, registrationStepLabel: (step) => `Step ${step}`, ValidIdStep: () => null, IdCameraScreen: () => null,
+        saveRegistrationId: async (token) => { savedIdWith = token; return true; } },
       '../api': {
         ApiRequestError,
+        changePassword: async (token, input) => { passwordSet = { token, ...input }; },
         registerBeneficiary: async ({ birthDate }) => {
           assert.equal(birthDate, '2000-02-29');
           requests.push('create');
@@ -583,6 +655,14 @@ test('existing accounts finish signup through the correct login or registration 
     assert.equal(session.owner.id, 'owner');
     if (scenario === 'pending-signup') assert.equal(navigation.step, 'consent');
     else assert.equal(destination, '/(tabs)/home');
+    // The ID photo is saved only after a new registration is verified, using the new session.
+    assert.equal(savedIdWith, scenario === 'pending-signup' ? 'test-session' : undefined);
+    assert.equal(savedProgramWith, scenario === 'pending-signup' ? 'test-session' : undefined);
+    // The chosen program is saved before the session starts, so Home loads with it.
+    if (scenario === 'pending-signup') assert.deepEqual(order, ['program', 'session']);
+    // The sign-up password is saved with the verified session and then cleared from memory.
+    assert.deepEqual(passwordSet, scenario === 'pending-signup' ? { token: 'test-session', newPassword: 'Sample2026' } : undefined);
+    if (scenario === 'pending-signup') assert.equal(state.registration.password, '');
   }
 });
 
@@ -1707,4 +1787,34 @@ test('document selection, uploading, failure retry, and received status follow s
   assert.ok(!button('Cancel correction'));
   assert.ok(content().includes('corrected.pdf'));
   cleanup();
+});
+
+test('Home shows what kind of beneficiary the person is, from their saved programs, in EN and BS', () => {
+  for (const language of ['en', 'bs']) {
+    const state = {
+      name: 'Maria Santos', faceEnrolled: true, notifications: [], overviewLoading: false, overviewError: false,
+      beneficiary: { id: 'owner', isVerified: true, hasPassword: true }, documents: [], accessToken: 'session',
+      refreshOverview: async () => {}, refreshDocuments: async () => {}, t: (en, bs) => language === 'en' ? en : bs,
+      overview: { nextSchedule: null, enrollments: [
+        { id: 'tupad', status: 'pending', enrollmentDate: '2026-11-20', program: { id: 'p2', code: 'TUPAD', name: 'TUPAD', type: '', description: null, grantAmount: null } },
+        { id: '4ps', status: 'approved', enrollmentDate: '2026-01-01', program: { id: 'p1', code: '4PS', name: 'Pantawid Pamilyang Pilipino Program', type: '', description: null, grantAmount: 1500 } },
+        { id: 'other', status: 'rejected', enrollmentDate: '2026-11-20', program: { id: 'p3', code: 'OTHER', name: 'Lingap sa Barangay', type: '', description: null, grantAmount: null } },
+      ] },
+    };
+    const components = new Proxy({}, { get: (_, key) => String(key) });
+    const main = loadSource('screens/main.tsx', {
+      react: { createElement: (type, props, ...children) => ({ type, props, children }), useState: (v) => [v, () => {}], useRef: () => ({ current: false }), useEffect: () => {} },
+      'react-native': { StyleSheet: { create: (styles) => styles } }, 'expo-router': {},
+      'lucide-react-native': components, '../components': components,
+      '../state': { useDemo: () => state, peso: String }, '../api': {},
+      '../format': loadSource('format.ts', {}), '../theme': { colors: {}, fonts: {} },
+    });
+    const text = JSON.stringify(main.HomeScreen());
+    const expected = language === 'en'
+      ? ['4Ps beneficiary', 'TUPAD · waiting for approval', 'Lingap sa Barangay · not approved', 'My programs', 'Approved beneficiary', 'Staff are checking your membership']
+      : ['Benepisyaryo sa 4Ps', 'TUPAD · naghulat sa pag-aprobar', 'Lingap sa Barangay · wala maaprobahi', 'Akong mga programa', 'Aprobado nga benepisyaryo', 'Gisusi sa staff ang imong pagkamiyembro'];
+    for (const phrase of expected) assert.ok(text.includes(phrase), `${language}: ${phrase}`);
+    // Approved programs come first in the header.
+    assert.ok(text.indexOf(expected[0]) < text.indexOf(expected[1]));
+  }
 });

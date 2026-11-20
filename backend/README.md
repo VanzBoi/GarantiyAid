@@ -26,14 +26,45 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 npm run db:generate
 npm run db:deploy
 npm run db:seed
+npm run db:seed:barangays
 npm run dev
 ```
+
+`db:seed:barangays` loads the official PSGC list of 3,003 barangays in Region VII (Bohol, Cebu, Negros Oriental, Siquijor) from `prisma/data/region7-barangays.json`. The mobile address picker groups them by province and city. Re-running it is safe.
+
+If the project folder is synced by OneDrive, the database can fail to start with `PGlite failed to initialize properly` because OneDrive turns its files into online-only placeholders. Add `LOCAL_DB_DIR=C:/Users/<you>/.garantiyaid` to `.env` to keep the database outside the synced folder, then run `npm run db:local` again.
+
+### Hosted demo on Railway
+
+The demo API runs on Railway with a Railway PostgreSQL database. It was deployed from this folder with the Railway CLI (`railway up --service backend`), not from GitHub. The `backend` service variables are:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `AUTH_PEPPER` | A random secret of at least 32 characters, kept only in Railway |
+| `NODE_ENV` | `development`, so the OTP appears on screen while SMS is not connected |
+| `RAILPACK_START_CMD` | `npm run deploy:prepare && npm start` |
+
+`deploy:prepare` applies migrations and loads the barangay list on every start. Demo accounts were seeded once. Uploaded documents are saved on the container disk and are lost on redeploy. Because `NODE_ENV=development` returns login codes to the caller, use this deployment only for testing with demo data.
 
 The seed is for local testing and resets its example records to the values in `src/seed.ts`. Keep `CORS_ORIGINS=http://localhost:8765,http://127.0.0.1:8765` when using the documented browser preview. Do not commit the private `.env` file.
 
 The API listens at `http://localhost:3000`. `GET /health` confirms that PostgreSQL is connected. The seed creates the verified mobile test account `0917 555 0147` with an approved 4Ps enrollment, a schedule dated October 2, 2026, and one completed claim with a posted PHP 1,500 assistance entry. The schedule has expired as of October 19, 2026, so the account correctly has no upcoming schedule or available QR pass. The fixed seed does not advance dates automatically.
 
 During development, OTP codes are printed in the backend terminal and returned as `developmentOtp` in the response. Production never returns or logs the code; an SMS provider must be connected before production use.
+
+### Real SMS codes (Semaphore)
+
+Set these variables (on Railway: the `backend` service › Variables) and redeploy:
+
+| Variable | Value |
+| --- | --- |
+| `SMS_PROVIDER` | `semaphore` |
+| `SEMAPHORE_API_KEY` | Your key from the Semaphore dashboard. Keep it private. |
+| `SEMAPHORE_SENDER_NAME` | Optional. Only a sender name Semaphore has approved; leave unset to use your account's default. |
+| `SMS_DAILY_LIMIT` | Optional safety cap, default 300 codes per day. |
+
+Codes go through Semaphore's OTP route (priority delivery, 2 credits per text). With SMS on, the API never returns the code, sign-up, password reset and the remaining code requests are texted, and email verification is paused until an email sender exists. Each network can request 5 codes per 10 minutes. If Semaphore fails, no code is saved and the person can retry immediately.
 
 ## Implemented endpoints
 
@@ -60,6 +91,30 @@ During development, OTP codes are printed in the backend terminal and returned a
 - `GET /beneficiaries/me/wallet/recipients/:walletNumber`, `POST /beneficiaries/me/wallet/simulated-transfers`
 - `GET /beneficiaries/me/biometrics`, `POST /beneficiaries/me/biometric-consents`, `POST /beneficiaries/me/biometric-consents/:consentId/revoke`
 - `POST /beneficiaries/me/biometrics/enrollment`, `POST /beneficiaries/me/biometrics/verification`
+- `GET /programs`, `POST /beneficiaries/me/enrollments` (DSWD program chosen at sign-up; always saved as `pending` with `source = mobile` until staff confirm it)
+- `POST /beneficiaries/me/assistant/reply` (AI help assistant)
+
+### Staff scanner page (distribution day)
+
+Open `/staff` on the API (for example `https://<your-railway-domain>/staff`) on a laptop or phone. Staff can:
+
+1. **Scan QR**: start the camera (or type the code), check the beneficiary's name, birth date, barangay, ID photo and queue, then **Release**. The release marks the claim completed, uses the QR pass once, records the amount in the beneficiary's wallet as an `assistance_credit`, and sends an in-app notification. Scanning the same pass again is refused. The wallet entry is a record of assistance handed over; no money moves through this API.
+2. **Enrollments**: approve or reject the programs beneficiaries chose at sign-up.
+3. **Distributions**: create a distribution day for a program. Every approved member gets a queue number, a time slot and a notification.
+
+Create a staff account (the password comes from the environment, not the command line):
+
+```bash
+STAFF_PASSWORD='choose-a-long-password-2026' npm run staff:create -- jdelacruz "Juan Dela Cruz"
+```
+
+On Railway, run it from the service shell. Running it again for the same username changes the password and ends that person's sessions. The camera needs HTTPS (Railway provides it) or `localhost`.
+
+### AI help assistant
+
+The Help tab's assistant answers any question in Bisaya, English or Tagalog using Claude (`claude-opus-5-5`, effort `medium`, with server-side refusal fallback enabled). Each reply is grounded in the signed-in beneficiary's own records: first name, barangay, programs and their status, schedules, recent claims, uploaded document types and face-verification status. Phone number, street address and ID number are not sent. Requests are limited to 30 per beneficiary per 10 minutes.
+
+Set `ANTHROPIC_API_KEY` in `.env` (or Railway variables) to turn it on. Without it, the endpoint returns `503 ASSISTANT_UNAVAILABLE` and the app falls back to its basic saved-record answers. Mention in your privacy notice that questions and the record summary are sent to Anthropic to generate replies.
 - `GET`, `POST`, `DELETE /beneficiaries/me/assistant/messages`
 
 ### Password, email, simulated wallet, simulated face, and assistant history

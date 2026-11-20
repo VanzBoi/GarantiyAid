@@ -8,7 +8,7 @@
       "policy": "fingerprint"
     },
     "updates": {
-      "url": "https://u.expo.dev/e10780ef-4c52-48ff-ad6e-1b3db08d8e36"
+      "url": "https://u.expo.dev/0ab6261d-f8c9-40ae-9628-edea90aed411"
     },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -34,6 +34,15 @@
       "expo-router",
       "expo-font",
       [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1652C5",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 240,
+          "resizeMode": "contain"
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Allow GarantiyAid to capture your face after you give consent.",
@@ -53,9 +62,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "e10780ef-4c52-48ff-ad6e-1b3db08d8e36"
+        "projectId": "0ab6261d-f8c9-40ae-9628-edea90aed411"
       }
     },
-    "owner": "ronan24"
+    "owner": "vanz3"
   }
 }

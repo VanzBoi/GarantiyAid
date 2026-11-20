@@ -21,6 +21,21 @@ test("registration input is normalized for storage", () => {
   assert.equal(result.birthDate.toISOString(), "1990-04-23T00:00:00.000Z");
 });
 
+test("registration keeps a listed valid ID and rejects unknown types or malformed numbers", () => {
+  assert.equal(parseRegistration(validRegistration).validIdType, null);
+  const withId = parseRegistration({ ...validRegistration, validIdType: "senior_citizen", validIdNumber: " osca-2024  0012 " });
+  assert.equal(withId.validIdType, "senior_citizen");
+  assert.equal(withId.validIdNumber, "OSCA-2024 0012");
+  for (const input of [
+    { validIdType: "library_card" },
+    { validIdType: "umid", validIdNumber: "12" },
+    { validIdType: "umid", validIdNumber: "0111<script>" },
+    { validIdNumber: "0111-2345678-9" },
+  ]) {
+    assert.throws(() => parseRegistration({ ...validRegistration, ...input }), (error) => error instanceof ApiError);
+  }
+});
+
 test("impossible calendar dates are rejected", () => {
   assert.throws(
     () => parseRegistration({ ...validRegistration, birthDate: "2026-02-31" }),

@@ -39,3 +39,29 @@ export function storeToken(token: string): Promise<void> {
 export function clearStoredToken(): Promise<void> {
   return writeToken(null);
 }
+
+// Face login key for this phone. It stays after logout (like a banking app) so the person can log in
+// with their face next time. Only a phone that turned face login on has it; a password reset revokes it.
+const FACE_LOGIN_KEY = 'garantiy-aid.face-login';
+export type FaceLoginDevice = { deviceId: string; deviceSecret: string; beneficiaryId: string; firstName: string };
+
+export async function getFaceLoginDevice(): Promise<FaceLoginDevice | null> {
+  if (Platform.OS === 'web') return null;
+  try {
+    const raw = await SecureStore.getItemAsync(FACE_LOGIN_KEY);
+    const value = raw ? JSON.parse(raw) as Partial<FaceLoginDevice> : null;
+    return value?.deviceId && value.deviceSecret && value.beneficiaryId ? { firstName: '', ...value } as FaceLoginDevice : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function storeFaceLoginDevice(device: FaceLoginDevice) {
+  if (Platform.OS === 'web') throw new Error('FACE_LOGIN_UNAVAILABLE');
+  await SecureStore.setItemAsync(FACE_LOGIN_KEY, JSON.stringify(device));
+}
+
+export async function clearFaceLoginDevice() {
+  if (Platform.OS === 'web') return;
+  try { await SecureStore.deleteItemAsync(FACE_LOGIN_KEY); } catch { /* Nothing saved. */ }
+}

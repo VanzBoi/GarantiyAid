@@ -41,13 +41,9 @@ export function FaceScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [stage, setStage] = useState<'intro' | 'camera' | 'sending' | 'done' | 'failed'>('intro');
   const [ready, setReady] = useState(false);
-  const [pictureSize, setPictureSize] = useState<string | undefined>();
   const [error, setError] = useState('');
   const [voice, setVoice] = useState(false);
   const camera = useRef<CameraView>(null);
-  const { width, height } = useWindowDimensions();
-  const ringWidth = Math.min(width - 64, 250);
-  const ringHeight = Math.min(height * .38, 310);
   const reducedMotion = useReducedMotion();
   useEffect(() => { if (accessToken) void refreshBiometrics(); }, [accessToken]);
   const automatic = useAutomaticFace({
@@ -77,10 +73,6 @@ export function FaceScreen() {
       setStage('failed');
     },
   });
-  useEffect(() => {
-    if (voice && automatic.visible && stage === 'camera' && !automatic.initializing) speakFaceHint(faceHints[automatic.guidance][0]);
-    return stopFaceVoice;
-  }, [voice, automatic.visible, automatic.guidance, automatic.initializing, stage]);
 
   const title = verify ? t('Verify identity', 'I-verify ang pagkatawo') : t('Capture face', 'Kuhaa ang nawong');
   if (!accessToken) {
@@ -134,7 +126,8 @@ export function FaceScreen() {
               : t('This demo saved a capture record only. No real biometric template or identity verification was created.', 'Capture record lamang ang gitipigan sa demo. Walay tinuod nga biometric template o identity verification nga nahimo.')}
           </Txt>
         </Card>}
-        {!verify && <Button icon={ShieldCheck} onPress={() => router.replace('/face/verify')}>{t('Verify my identity', 'I-verify ang akong pagkatawo')}</Button>}
+        {!verify && <Button icon={ScanFace} onPress={() => router.replace('/face-login-settings')}>{t('Use my face to log in', 'Gamita akong nawong sa pag-log in')}</Button>}
+        {!verify && <Button variant="outline" icon={ShieldCheck} onPress={() => router.replace('/face/verify')}>{t('Verify my identity', 'I-verify ang akong pagkatawo')}</Button>}
         <Button variant="outline" onPress={() => router.replace('/flow/capture')}>{t('View face verification status', 'Tan-awa ang kahimtang')}</Button>
       </Page>
     );
@@ -182,22 +175,61 @@ export function FaceScreen() {
     );
   }
 
-  const sending = stage === 'sending';
+  return (
+    <FaceCamera
+      cameraRef={camera}
+      automatic={automatic}
+      title={title}
+      sending={stage === 'sending'}
+      simulated={simulated}
+      ready={ready}
+      error={error}
+      voice={voice}
+      onToggleVoice={() => setVoice((value) => !value)}
+      onReady={() => setReady(true)}
+      onMountError={() => { setReady(false); setError(t('The camera could not start.', 'Wala nagsugod ang camera.')); setStage('failed'); }}
+    />
+  );
+}
+
+/** Full-screen front camera with the oval guide and live hints, shared by face registration, verification and face login. */
+export function FaceCamera({ cameraRef, automatic, title, sending, simulated, ready, error, voice, onToggleVoice, onReady, onMountError }: {
+  cameraRef: React.RefObject<CameraView | null>;
+  automatic: ReturnType<typeof useAutomaticFace>;
+  title: string;
+  sending: boolean;
+  simulated: boolean;
+  ready: boolean;
+  error: string;
+  voice: boolean;
+  onToggleVoice: () => void;
+  onReady: () => void;
+  onMountError: () => void;
+}) {
+  const { t } = useDemo();
+  const [pictureSize, setPictureSize] = useState<string | undefined>();
+  const { width, height } = useWindowDimensions();
+  const ringWidth = Math.min(width - 64, 250);
+  const ringHeight = Math.min(height * .38, 310);
+  useEffect(() => {
+    if (voice && automatic.visible && !sending && !automatic.initializing) speakFaceHint(faceHints[automatic.guidance][0]);
+    return stopFaceVoice;
+  }, [voice, automatic.visible, automatic.guidance, automatic.initializing, sending]);
   return (
     <View style={s.screen}>
       {automatic.visible && <CameraView
-        ref={camera}
+        ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing="front"
         mirror
         animateShutter={false}
         pictureSize={pictureSize}
         onCameraReady={() => {
-          camera.current?.getAvailablePictureSizesAsync()
+          cameraRef.current?.getAvailablePictureSizesAsync()
             .then((sizes) => setPictureSize(smallestUsefulSize(sizes)))
-            .catch(() => {}).finally(() => setReady(true));
+            .catch(() => {}).finally(onReady);
         }}
-        onMountError={() => { setReady(false); setError(t('The camera could not start.', 'Wala nagsugod ang camera.')); setStage('failed'); }}
+        onMountError={onMountError}
       />}
       <SafeAreaView style={s.overlay} edges={['top', 'bottom', 'left', 'right']}>
         <View style={s.top}>
@@ -207,7 +239,7 @@ export function FaceScreen() {
           <Txt accessibilityRole="header" variant="heading" style={{ color: c.onPrimary, flex: 1 }}>
             {title}
           </Txt>
-          <Pressable accessibilityRole="button" accessibilityState={{ selected: voice }} accessibilityLabel={voice ? t('Turn off English voice guidance', 'I-off ang English voice guidance') : t('Turn on English voice guidance', 'I-on ang English voice guidance')} onPress={() => setVoice(value => !value)} style={s.back}>
+          <Pressable accessibilityRole="button" accessibilityState={{ selected: voice }} accessibilityLabel={voice ? t('Turn off English voice guidance', 'I-off ang English voice guidance') : t('Turn on English voice guidance', 'I-on ang English voice guidance')} onPress={onToggleVoice} style={s.back}>
             {voice ? <Volume2 size={22} color={c.onPrimary} /> : <VolumeX size={22} color={c.onPrimary} />}
           </Pressable>
         </View>

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bot, History, Send, Sparkles, UserRound, Headset } from 'lucide-react-native';
 import { FadeIn, go, IconCircle, LanguageToggle, Notice, openRoute, styles, Txt } from '../components';
 import { peso, useDemo } from '../state';
+import { ApiRequestError, askAssistant, isUnavailableOnServer } from '../api';
 import {
   formatDate,
   formatDateTime,
@@ -21,39 +23,35 @@ import {
 } from '../format';
 import { colors as c } from '../theme';
 
-type Message = { id: number; role: 'user' | 'assistant'; en: string; bs: string };
+type Message = { id: number; role: 'user' | 'assistant'; en: string; bs: string; failed?: boolean };
 const greeting: Message = {
   id: 0,
   role: 'assistant',
-  en: 'Hi! I’m GarantiyAid’s assistant. I can help you with your schedule, what to bring, and your claim status. What would you like to know?',
-  bs: 'Kumusta! Ako ang assistant sa GarantiyAid. Makatabang ko sa imong iskedyul, dad-on, ug kahimtang sa claim. Unsay gusto nimong mahibal-an?',
+  en: 'Hi! I’m the GarantiyAid assistant. Ask me anything in English or Bisaya: your schedule, claim status, DSWD programs, requirements, or how to use the app.',
+  bs: 'Kumusta! Ako ang assistant sa GarantiyAid. Pangutana bisan unsa sa Bisaya o English: imong iskedyul, kahimtang sa claim, mga programa sa DSWD, requirements, o unsaon paggamit sa app.',
 };
 export function HelpScreen() {
-  const { t, overview, overviewLoading, overviewError, wallet, walletError, saveChat } = useDemo();
+  const { t, language, accessToken, overview, overviewLoading, overviewError, wallet, walletError, saveChat } = useDemo();
   const [messages, setMessages] = useState<Message[]>([greeting]);
   const [input, setInput] = useState('');
+  const [thinking, setThinking] = useState(false);
+  // Set when the server has no AI assistant; answers then come from saved records and fixed guidance only.
+  const [aiOff, setAiOff] = useState(false);
+  const busy = useRef(false);
+  const nextId = useRef(1);
   const scroll = useRef<ScrollView>(null);
   const questions = [
-    {
-      en: 'When is my next claim?',
-      bs: 'Kanus-a akong sunod nga claim?',
-      kind: 'schedule',
-    },
-    {
-      en: 'What is my claim status?',
-      bs: 'Unsa ang kahimtang sa akong claim?',
-      kind: 'status',
-    },
+    { en: 'When is my next claim?', bs: 'Kanus-a akong sunod nga claim?', kind: 'schedule' },
+    { en: 'What is my claim status?', bs: 'Unsa ang kahimtang sa akong claim?', kind: 'status' },
     { en: 'What should I bring?', bs: 'Unsay akong dad-on?', kind: 'bring' },
+    { en: 'What is 4Ps and who can join?', bs: 'Unsa ang 4Ps ug kinsa ang pwede?', kind: 'program' },
     { en: 'My face scan failed!', bs: 'Napakyas akong face scan!', kind: 'scan' },
-    {
-      en: 'How do I enroll my face?',
-      bs: 'Unsaon pag-enroll sa nawong?',
-      kind: 'enroll',
-    },
+    { en: 'How do I reset my password?', bs: 'Unsaon pag-reset sa akong password?', kind: 'password' },
   ];
-  const ask = (en: string, bs: string, kind?: string) => {
-    if (!en.trim()) return;
+  const id = () => nextId.current++;
+
+  /** Answers from saved records and fixed guidance, used when the AI assistant is not available. */
+  const scriptedAnswer = (en: string, kind?: string): { en: string; bs: string } => {
     const query = en.toLowerCase();
     const asksClaimStatus =
       (query.includes('claim') || query.includes('claimed')) &&
@@ -73,11 +71,15 @@ export function HelpScreen() {
             ? 'scan'
             : query.includes('enroll')
               ? 'enroll'
-              : query.includes('claim') ||
-                  query.includes('schedule') ||
-                  query.includes('iskedyul')
-                ? 'schedule'
-                : 'unknown');
+              : query.includes('password')
+                ? 'password'
+                : query.includes('4ps') || query.includes('program')
+                  ? 'program'
+                  : query.includes('claim') ||
+                      query.includes('schedule') ||
+                      query.includes('iskedyul')
+                    ? 'schedule'
+                    : 'unknown');
     const statusAnswer = (() => {
       if (walletError) {
         return {
@@ -99,12 +101,8 @@ export function HelpScreen() {
         };
       }
       if (current) {
-        const recordedEn = current.claimedAt
-          ? ` It was recorded ${formatDateTime(current.claimedAt)}.`
-          : '';
-        const recordedBs = current.claimedAt
-          ? ` Girekord kini niadtong ${formatDateTime(current.claimedAt)}.`
-          : '';
+        const recordedEn = current.claimedAt ? ` It was recorded ${formatDateTime(current.claimedAt)}.` : '';
+        const recordedBs = current.claimedAt ? ` Girekord kini niadtong ${formatDateTime(current.claimedAt)}.` : '';
         return {
           en: `Your current ${current.program.name} claim status is ${formatClaimStatus(current.status, en => en, current.deliveryMode)}.${recordedEn}`,
           bs: `Ang kahimtang sa imong kasamtangang ${current.program.name} claim kay ${formatClaimStatus(current.status, (_en, bs) => bs, current.deliveryMode)}.${recordedBs}`,
@@ -119,12 +117,8 @@ export function HelpScreen() {
         const receiptBs = latest.receipt ? ` Numero sa resibo: ${latest.receipt.number}.` : transaction
           ? ` Ang resibo ${transaction.reference} nagrekord og ${peso(transaction.amount)}.`
           : '';
-        const recordedEn = latest.claimedAt
-          ? ` It was recorded ${formatDateTime(latest.claimedAt)}.`
-          : '';
-        const recordedBs = latest.claimedAt
-          ? ` Girekord kini niadtong ${formatDateTime(latest.claimedAt)}.`
-          : '';
+        const recordedEn = latest.claimedAt ? ` It was recorded ${formatDateTime(latest.claimedAt)}.` : '';
+        const recordedBs = latest.claimedAt ? ` Girekord kini niadtong ${formatDateTime(latest.claimedAt)}.` : '';
         return {
           en: `Your latest ${latest.program.name} claim status is ${formatClaimStatus(latest.status, en => en, latest.deliveryMode)}.${recordedEn}${receiptEn}`,
           bs: `Ang pinakabag-o nimong ${latest.program.name} claim kay ${formatClaimStatus(latest.status, (_en, bs) => bs, latest.deliveryMode)}.${recordedBs}${receiptBs}`,
@@ -164,24 +158,63 @@ export function HelpScreen() {
         en: 'Open Profile → View face verification → Review consent. Save consent if you agree, then visit your barangay facilitator for face capture. Phone sign-in remains available.',
         bs: 'Ablihi ang Profile → Tan-awa ang face verification → Basaha ang pagtugot. Tipigi ang pagtugot kon mouyon, dayon bisitaha ang barangay facilitator alang sa face capture. Magamit gihapon ang pagsulod gamit ang numero.',
       },
+      program: {
+        en: 'Home and My programs show the programs saved on your account. To find out who can join a DSWD program like 4Ps, ask your barangay or city social welfare office, or use Talk to staff.',
+        bs: 'Makita sa Home ug Akong programa ang mga programa nga natipig sa imong account. Aron mahibal-an kinsa ang pwede sa programa sa DSWD sama sa 4Ps, pangutana sa barangay o social welfare office sa siyudad, o gamita ang Pakigsulti sa staff.',
+      },
+      password: {
+        en: 'On the Log in screen, tap Forgot password. Enter your number, the code we send, and a new password. If you are logged in, use Profile › Change password.',
+        bs: 'Sa Log in nga screen, i-tap ang Nakalimot sa password. Isulod ang imong numero, ang code nga among ipadala, ug bag-ong password. Kon naka-log in ka, gamita ang Profile › Usba ang password.',
+      },
       unknown: {
-        en: 'This assistant reads your saved schedule and claim status and offers general guidance. Use Talk to staff to send a concern and check saved staff replies. No external AI is used here.',
-        bs: 'Mabasa sa assistant ang natipig nga iskedyul ug kahimtang sa claim ug mohatag og kinatibuk-ang giya. Gamita ang Pakigsulti sa staff aron makapadala og kabalaka ug masusi ang natipig nga tubag. Walay external AI nga gigamit dinhi.',
+        en: 'The AI assistant is not available right now, so I can only answer questions about your schedule, claim status, what to bring, passwords and face scans. For other questions, use Talk to staff.',
+        bs: 'Dili magamit ang AI assistant karon, mao nga ang matubag ra nako kay bahin sa imong iskedyul, kahimtang sa claim, dad-on, password ug face scan. Sa ubang pangutana, gamita ang Pakigsulti sa staff.',
       },
     };
-    const answer = answers[detected];
-    // Saved in the language shown, so chat history reads the way the person saw it.
-    saveChat?.([
-      { role: 'user', text: t(en, bs).trim() },
-      { role: 'assistant', text: t(answer.en, answer.bs) },
-    ]);
-    setMessages((previous) => [
-      ...previous,
-      { id: previous.length, role: 'user', en: en.trim(), bs: bs.trim() },
-      { id: previous.length + 1, role: 'assistant', ...answer },
-    ]);
-    setInput('');
+    return answers[detected];
   };
+
+  const ask = async (en: string, bs: string, kind?: string) => {
+    const shown = t(en, bs).trim();
+    if (!shown || busy.current) return;
+    const question: Message = { id: id(), role: 'user', en: en.trim(), bs: bs.trim() };
+    setInput('');
+    if (!accessToken || aiOff) {
+      const answer = scriptedAnswer(en, kind);
+      // Saved in the language shown, so chat history reads the way the person saw it.
+      saveChat?.([{ role: 'user', text: shown }, { role: 'assistant', text: t(answer.en, answer.bs) }]);
+      setMessages((previous) => [...previous, question, { id: id(), role: 'assistant', ...answer }]);
+      return;
+    }
+    busy.current = true;
+    setThinking(true);
+    const history = [...messages.slice(1), question]
+      .filter((message) => !message.failed)
+      .slice(-20)
+      .map((message) => ({ role: message.role, text: t(message.en, message.bs) }));
+    setMessages((previous) => [...previous, question]);
+    try {
+      const { text } = await askAssistant(accessToken, history, language);
+      saveChat?.([{ role: 'user', text: shown }, { role: 'assistant', text }]);
+      setMessages((previous) => [...previous, { id: id(), role: 'assistant', en: text, bs: text }]);
+    } catch (error) {
+      if (isUnavailableOnServer(error) || (error instanceof ApiRequestError && error.code === 'ASSISTANT_UNAVAILABLE')) {
+        setAiOff(true);
+        const answer = scriptedAnswer(en, kind);
+        setMessages((previous) => [...previous, { id: id(), role: 'assistant', ...answer }]);
+      } else {
+        const reply = error instanceof ApiRequestError && error.code === 'ASSISTANT_BUSY'
+          ? { en: 'Many questions were sent in a short time. Please wait a few minutes and try again.', bs: 'Daghan kaayo ang pangutana sa mubo nga panahon. Paghulat og pipila ka minuto ug sulayi pag-usab.' }
+          : { en: 'I could not answer right now. Check your internet connection and try again.', bs: 'Dili ko makatubag karon. Susiha ang imong internet ug sulayi pag-usab.' };
+        setMessages((previous) => [...previous, { id: id(), role: 'assistant', ...reply, failed: true }]);
+      }
+    } finally {
+      busy.current = false;
+      setThinking(false);
+    }
+  };
+
+  const canSend = !!input.trim() && !thinking;
   return (
     <SafeAreaView
       edges={['top', 'left', 'right']}
@@ -200,8 +233,11 @@ export function HelpScreen() {
               {t('Assistant', 'Katabang')}
             </Txt>
             <View style={[styles.row, { gap: 6 }]}>
-              <Txt variant="small" numberOfLines={2} style={{ fontSize: 12 }}>
-                {t('Answers from your saved records', 'Tubag gikan sa imong rekord')}
+              <View style={[s.statusDot, aiOff && { backgroundColor: c.subtle }]} />
+              <Txt variant="small" numberOfLines={2} style={{ fontSize: 12, flex: 1 }}>
+                {aiOff || !accessToken
+                  ? t('Basic answers from your records', 'Batakang tubag gikan sa imong rekord')
+                  : t('AI assistant · English or Bisaya', 'AI assistant · Bisaya o English')}
               </Txt>
             </View>
           </View>
@@ -238,10 +274,15 @@ export function HelpScreen() {
           onContentSizeChange={() => { if (messages.length > 1) scroll.current?.scrollToEnd({ animated: true }); }}
         >
           <Notice>
-            {t(
-              'Schedule and claim answers use your saved account. Other answers are general guidance. Talk to staff for help with your case.',
-              'Ang iskedyul ug kahimtang sa claim gikan sa imong account. Kinatibuk-ang giya ang ubang tubag. Pakigsulti sa staff alang sa imong kaso.',
-            )}
+            {aiOff || !accessToken
+              ? t(
+                  'Schedule and claim answers use your saved account. Other answers are general guidance. Talk to staff for help with your case.',
+                  'Ang iskedyul ug kahimtang sa claim gikan sa imong account. Kinatibuk-ang giya ang ubang tubag. Pakigsulti sa staff alang sa imong kaso.',
+                )
+              : t(
+                  'Answers use your saved records. AI can make mistakes. Staff decide on programs, eligibility and claims. Never share your password or codes.',
+                  'Ang tubag gibase sa imong rekord. Mahimong masayop ang AI. Ang staff ang modesisyon sa programa, eligibility ug claim. Ayaw ipaambit ang password o code.',
+                )}
           </Notice>
           {messages.map((message) => (
             <FadeIn key={message.id} distance={8}>
@@ -251,10 +292,11 @@ export function HelpScreen() {
                 style={[s.messageRow, message.role === 'user' && { justifyContent: 'flex-end' }]}
               >
                 {message.role === 'assistant' && (
-                  <IconCircle icon={Sparkles} size={32} tone="primary" />
+                  <IconCircle icon={Sparkles} size={32} tone={message.failed ? 'amber' : 'primary'} />
                 )}
-                <View style={[s.bubble, message.role === 'user' ? s.userBubble : s.assistantBubble]}>
+                <View style={[s.bubble, message.role === 'user' ? s.userBubble : s.assistantBubble, message.failed && s.failedBubble]}>
                   <Txt
+                    selectable
                     style={{
                       color: message.role === 'user' ? c.onPrimary : c.text,
                       fontSize: 15,
@@ -268,6 +310,15 @@ export function HelpScreen() {
               </View>
             </FadeIn>
           ))}
+          {thinking && (
+            <View accessibilityLiveRegion="polite" style={s.messageRow}>
+              <IconCircle icon={Sparkles} size={32} tone="primary" />
+              <View style={[s.bubble, s.assistantBubble, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+                <ActivityIndicator size="small" color={c.primary} />
+                <Txt variant="small" style={{ color: c.muted }}>{t('Thinking…', 'Naghunahuna…')}</Txt>
+              </View>
+            </View>
+          )}
           {messages.length === 1 && (
             <View style={{ gap: 10 }}>
               <Txt variant="label" style={{ fontSize: 13, color: c.muted }}>
@@ -295,22 +346,21 @@ export function HelpScreen() {
             accessibilityLabel={t('Message to the assistant', 'Mensahe sa assistant')}
             value={input}
             onChangeText={setInput}
-            placeholder={t('Type a message…', 'Isulat ang mensahe…')}
+            placeholder={t('Ask anything…', 'Pangutana bisan unsa…')}
             placeholderTextColor={c.subtle}
             style={s.input}
-            maxLength={500}
-            onSubmitEditing={() => ask(input, input)}
-            returnKeyType="send"
+            maxLength={1000}
+            multiline
           />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('Send message', 'Ipadala ang mensahe')}
-            accessibilityState={{ disabled: !input.trim() }}
-            disabled={!input.trim()}
+            accessibilityState={{ disabled: !canSend }}
+            disabled={!canSend}
             onPress={() => ask(input, input)}
-            style={[s.send, { backgroundColor: input.trim() ? c.primary : c.outline }]}
+            style={[s.send, { backgroundColor: canSend ? c.primary : c.outline }]}
           >
-            <Send size={20} color={input.trim() ? c.onPrimary : c.muted} />
+            <Send size={20} color={canSend ? c.onPrimary : c.muted} />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -334,6 +384,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.green },
   actions: {
     flexDirection: 'row',
     gap: 8,
@@ -372,6 +423,7 @@ const s = StyleSheet.create({
     borderColor: '#EDF1F6',
     boxShadow: '0px 2px 8px rgba(16, 42, 86, 0.06)',
   },
+  failedBubble: { backgroundColor: c.amberSoft, borderColor: '#F3E3B5' },
   userBubble: { backgroundColor: c.primary, borderBottomRightRadius: 6 },
   questions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   question: {
@@ -389,7 +441,7 @@ const s = StyleSheet.create({
     gap: 10,
     padding: 12,
     paddingHorizontal: 16,
-    alignItems: 'center',
+    alignItems: 'flex-end',
     borderTopWidth: 1,
     borderColor: c.outline,
     backgroundColor: c.card,
@@ -397,14 +449,16 @@ const s = StyleSheet.create({
   input: {
     flex: 1,
     minHeight: 50,
+    maxHeight: 130,
     borderRadius: 16,
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingVertical: 13,
     fontSize: 15,
     color: c.text,
     backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.outline,
+    textAlignVertical: 'top',
   },
   send: {
     width: 50,

@@ -32,7 +32,7 @@ test('wallet amounts accept peso formatting with at most two decimals', () => {
 });
 
 test('password rules match the server and strength rises with length and variety', () => {
-  const { meetsPasswordRules, passwordStrength } = loadPure('screens/account.tsx');
+  const { meetsPasswordRules, passwordStrength } = loadPure('password.tsx');
   assert.equal(meetsPasswordRules('Garantiy2026'), true);
   for (const value of ['short1', 'onlyletters', '1234567890', 'x'.repeat(127) + '1a']) assert.equal(meetsPasswordRules(value), false);
   assert.ok(passwordStrength('Garantiy2026!') > passwordStrength('abc12345'));

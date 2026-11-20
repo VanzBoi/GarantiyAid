@@ -5,7 +5,7 @@ import { CameraView } from 'expo-camera';
 import { File } from 'expo-file-system';
 import { createFaceDetector } from './face-detector';
 import { emptyGuide, guideFace, type Guidance } from './face-guidance';
-import { enrollFace, getFaceChallenge, verifyFace, type FaceChallenge, type FaceEnrollmentResult, type FaceVerificationResult } from './api';
+import { enrollFace, faceLogin, getFaceChallenge, getFaceLoginChallenge, verifyFace, type FaceChallenge, type FaceEnrollmentResult, type FaceLoginCredential, type FaceLoginResult, type FaceVerificationResult } from './api';
 
 export const faceHints: Record<Guidance, [string, string]> = {
   searching: ['Position your face inside the oval', 'Ibutang ang nawong sulod sa oval'],
@@ -19,7 +19,10 @@ export const faceHints: Record<Guidance, [string, string]> = {
 };
 type Options = {
   camera: RefObject<CameraView | null>; active: boolean; ready: boolean; accessToken: string; consentId?: string; verify: boolean;
+  /** Face login on a phone where it was turned on: no session yet, the phone's key identifies the account. */
+  login?: FaceLoginCredential;
   onSending(): void; onResult(result: FaceEnrollmentResult | FaceVerificationResult): void; onError(error: unknown): void; onPause(): void;
+  onLogin?(session: FaceLoginResult): void;
 };
 export function useAutomaticFace(options: Options) {
   const callbacks = useRef(options); callbacks.current = options;
@@ -36,8 +39,9 @@ export function useAutomaticFace(options: Options) {
   useEffect(() => {
     if (!options.active || !options.ready || !focused || !foreground) return;
     let disposed = false;
-    const { accessToken, consentId, verify } = options;
-    const current = () => !disposed && callbacks.current.active && callbacks.current.accessToken === accessToken && callbacks.current.consentId === consentId && callbacks.current.verify === verify;
+    const { accessToken, consentId, verify, login } = options;
+    const current = () => !disposed && callbacks.current.active && callbacks.current.accessToken === accessToken && callbacks.current.consentId === consentId
+      && callbacks.current.verify === verify && callbacks.current.login?.deviceId === login?.deviceId;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let initializationTimer: ReturnType<typeof setTimeout> | undefined;
     let detector: Awaited<ReturnType<typeof createFaceDetector>> | undefined;
@@ -49,6 +53,12 @@ export function useAutomaticFace(options: Options) {
     async function submit() {
       callbacks.current.onSending();
       try {
+        if (login) {
+          const session = await faceLogin(login, frames, challenge.id);
+          frames = [];
+          if (current()) callbacks.current.onLogin?.(session);
+          return;
+        }
         const result = verify ? await verifyFace(accessToken, frames, challenge.id) : await enrollFace(accessToken, frames, challenge.id);
         frames = [];
         if (current()) callbacks.current.onResult(result);
@@ -87,13 +97,13 @@ export function useAutomaticFace(options: Options) {
       try {
         detector = await createFaceDetector();
         if (!current()) { detector.close(); return; }
-        challenge = await getFaceChallenge(accessToken, verify ? 'verify' : 'enroll');
+        challenge = login ? await getFaceLoginChallenge(login) : await getFaceChallenge(accessToken, verify ? 'verify' : 'enroll');
         if (!current()) return;
         clearTimeout(initializationTimer);
         setTotal(challenge.poses.length); setInitializing(false); void tick();
       } catch (cause) { clearTimeout(initializationTimer); error(cause); }
     })();
     return () => { disposed = true; if (timer) clearTimeout(timer); clearTimeout(initializationTimer); frames = []; detector?.close(); };
-  }, [options.active, options.ready, options.accessToken, options.consentId, options.verify, focused, foreground]);
+  }, [options.active, options.ready, options.accessToken, options.consentId, options.verify, options.login?.deviceId, focused, foreground]);
   return { guidance, progress, completed, total, initializing, visible: focused && foreground };
 }

@@ -11,6 +11,17 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "lan-apk": {
+      "distribution": "internal",
+      "channel": "lan-apk",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://backend-production-9a4c012a.up.railway.app",
+        "ALLOW_HTTP_API": "1"
+      }
     }
   }
 }

@@ -10,7 +10,30 @@ type RegistrationInput = {
   address: string;
   barangayId: string;
   contactNumber: string;
+  validIdType: string | null;
+  validIdNumber: string | null;
 };
+
+// Matches the ID list offered by the mobile app (mobile/src/id-types.ts).
+export const VALID_ID_TYPES = [
+  "philsys", "senior_citizen", "pwd", "drivers_license", "umid", "sss", "gsis", "philhealth", "passport",
+  "postal", "voters", "prc", "tin", "pagibig", "nbi", "police", "barangay", "fourps", "solo_parent", "ncip",
+  "ofw", "seafarer", "ibp", "government_office", "school", "other",
+];
+
+function validId(body: Record<string, unknown>) {
+  const type = optionalText(body, "validIdType", 32);
+  const number = optionalText(body, "validIdNumber", 40);
+  if (type && !VALID_ID_TYPES.includes(type)) {
+    throw new ApiError(422, "VALIDATION_ERROR", "Please correct the highlighted fields.", { validIdType: "Choose a listed ID type." });
+  }
+  if (number && (!type || !/^[A-Z0-9][A-Z0-9 -]{2,39}$/i.test(number))) {
+    throw new ApiError(422, "VALIDATION_ERROR", "Please correct the highlighted fields.", {
+      validIdNumber: "Use letters, numbers, spaces or dashes, and choose the ID type.",
+    });
+  }
+  return { validIdType: type, validIdNumber: number ? number.toUpperCase().replace(/\s+/g, " ") : null };
+}
 
 function bodyRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -99,6 +122,7 @@ export function parseRegistration(value: unknown): RegistrationInput {
     address,
     barangayId: uuid(body.barangayId, "barangayId"),
     contactNumber,
+    ...validId(body),
   };
 }
 

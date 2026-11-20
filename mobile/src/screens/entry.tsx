@@ -9,6 +9,9 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { BiometricConsentScreen, BiometricEnrollmentScreen } from './biometrics';
+import { IdCameraScreen, REGISTRATION_STEPS, registrationStepLabel, saveRegistrationId, ValidIdStep } from './valid-id';
+import { ProgramStep, saveRegistrationProgram } from './program-step';
+import { LoginScreen } from './login';
 import { StatusBar } from 'expo-status-bar';
 import {
   CalendarDays,
@@ -17,6 +20,7 @@ import {
   MapPin,
   MessageSquareText,
   QrCode,
+  IdCard,
   ScanFace,
   ShieldCheck,
   UserPlus,
@@ -33,6 +37,7 @@ import {
   Logo,
   Notice,
   Page,
+  PasswordInput,
   PhoneField,
   ScreenIntro,
   Shake,
@@ -45,8 +50,11 @@ import {
 import { useDemo } from '../state';
 import { BarangayPicker } from '../barangay-picker';
 import { BirthDatePicker } from '../birth-date-picker';
+import { meetsPasswordRules, StrengthMeter } from '../password';
 import {
   ApiRequestError,
+  IS_SHARED_BACKEND,
+  changePassword,
   getBarangays,
   registerBeneficiary,
   requestOtp,
@@ -91,7 +99,7 @@ export function Onboarding() {
       header={false}
       footer={
         <>
-          <Button icon={ArrowRight} onPress={() => flow('account-info')}>
+          <Button icon={ArrowRight} onPress={() => flow('valid-id')}>
             {t('Create Account', 'Paghimo og Account')}
           </Button>
           <View style={[styles.row, { justifyContent: 'center', gap: 2 }]}>
@@ -144,9 +152,24 @@ export function Onboarding() {
   );
 }
 
-function Progress({ step, total }: { step: number; total: number }) {
+function Progress({ step }: { step: number }) {
   const { t } = useDemo();
-  return <StepProgress step={step} total={total} label={t(`Step ${step} of ${total}`, `Lakang ${step} sa ${total}`)} />;
+  return <StepProgress step={step} total={REGISTRATION_STEPS} label={registrationStepLabel(step, t)} />;
+}
+
+/** Reminds people to double-check details that were filled in from their ID photo. */
+function FromIdNotice({ count }: { count: number }) {
+  const { t } = useDemo();
+  if (!count) return null;
+  return (
+    <View style={s.fromId}>
+      <IdCard size={18} color={c.primary} />
+      <Txt variant="small" style={{ flex: 1, color: c.navy }}>
+        {t(`${count} ${count === 1 ? 'detail was' : 'details were'} filled in from your ID. Check each one before continuing.`,
+          `${count} ka detalye ang napuno gikan sa imong ID. Susiha ang matag usa sa dili pa mopadayon.`)}
+      </Txt>
+    </View>
+  );
 }
 
 const isValidBirthDate = (value: string) => {
@@ -191,6 +214,9 @@ export function AccountSetup() {
   const [birthDate, setBirthDate] = useState(registration.birthDate);
   const [sex, setSex] = useState(registration.sex);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const fromId = registration.fromId;
+  const readFromId = (field: keyof typeof fromId) =>
+    fromId[field] ? t('From your ID · check it is correct', 'Gikan sa imong ID · susiha kon sakto') : undefined;
   const continueToAddress = () => {
     const nextErrors: Record<string, boolean> = {};
     if (!plausibleName(firstName)) nextErrors.firstName = true;
@@ -220,34 +246,20 @@ export function AccountSetup() {
   ];
   return (
     <Page
-      header={false}
-      footer={
-        <>
-          <Button onPress={continueToAddress}>{t('Continue', 'Padayon')}</Button>
-          <View style={[styles.row, { justifyContent: 'center', gap: 2 }]}>
-            <Txt variant="small">{t('Already have an account?', 'Naa na kay account?')}</Txt>
-            <TextLink onPress={() => flow('login')}>{t('Log in', 'Log in')}</TextLink>
-          </View>
-        </>
-      }
+      title={t('Create account', 'Paghimo og account')}
+      footer={<Button onPress={continueToAddress}>{t('Continue', 'Padayon')}</Button>}
     >
-      <View style={[styles.row, { justifyContent: 'space-between' }]}>
-        <View style={[styles.row, { gap: 8 }]}>
-          <Logo size={34} />
-          <Txt variant="label" style={{ color: c.navy }}>GarantiyAid</Txt>
-        </View>
-        <LanguageToggle />
-      </View>
-      <Progress step={1} total={4} />
+      <Progress step={2} />
       <View style={{ gap: 7 }}>
-        <Txt accessibilityRole="header" variant="title">{t('Create your account', 'Paghimo sa imong account')}</Txt>
+        <Txt accessibilityRole="header" variant="title">{t('Your personal details', 'Imong personal nga detalye')}</Txt>
         <Txt style={{ color: c.muted }}>
           {t(
-            'Tell us about the beneficiary. Use the same information shown on official records.',
-            'Isulti ang impormasyon sa benepisyaryo. Gamita ang parehas nga detalye sa opisyal nga rekord.',
+            'Use the same information shown on your ID and official records.',
+            'Gamita ang parehas nga detalye sa imong ID ug opisyal nga rekord.',
           )}
         </Txt>
       </View>
+      <FromIdNotice count={(['firstName', 'middleName', 'lastName', 'birthDate'] as const).filter((key) => fromId[key]).length} />
       <Card style={{ gap: 14 }}>
         <View style={styles.row}>
           <IconCircle icon={ContactRound} size={40} square />
@@ -283,6 +295,7 @@ export function AccountSetup() {
           autoComplete="given-name"
           textContentType="givenName"
           maxLength={60}
+          helper={readFromId('firstName')}
         />
         <Field
           label={t('Middle name (optional)', 'Tunga nga ngalan (opsyonal)')}
@@ -304,6 +317,7 @@ export function AccountSetup() {
           autoComplete="additional-name"
           textContentType="middleName"
           maxLength={60}
+          helper={readFromId('middleName')}
         />
         <Field
           label={t('Last name', 'Apelyido')}
@@ -325,6 +339,7 @@ export function AccountSetup() {
           autoComplete="family-name"
           textContentType="familyName"
           maxLength={60}
+          helper={readFromId('lastName')}
         />
         <BirthDatePicker
           value={birthDate}
@@ -338,6 +353,7 @@ export function AccountSetup() {
               : undefined
           }
         />
+        {fromId.birthDate && !errors.birthDate && <Txt variant="small" style={{ marginTop: -6 }}>{readFromId('birthDate')}</Txt>}
         <View style={{ gap: 8 }}>
           <Txt variant="label">{t('Sex', 'Sekso')}</Txt>
           <View
@@ -419,14 +435,15 @@ function AccountAddress() {
     setErrors({ address: !validAddress, barangay: !selectedBarangay });
     if (!validAddress || !selectedBarangay) return;
     setRegistration({ address: address.trim(), barangayId: selectedBarangay.id });
-    flow('mobile-number');
+    flow('program');
   };
   return (
     <Page
       title={t('Create account', 'Paghimo og account')}
       footer={<Button disabled={!barangays?.length} onPress={continueToPhone}>{t('Continue', 'Padayon')}</Button>}
     >
-      <Progress step={2} total={4} />
+      <Progress step={3} />
+      <FromIdNotice count={registration.fromId.address ? 1 : 0} />
       <View style={{ gap: 7 }}>
         <Txt accessibilityRole="header" variant="title">{t('Where do you live?', 'Asa ka nagpuyo?')}</Txt>
         <Txt style={{ color: c.muted }}>
@@ -461,9 +478,10 @@ function AccountAddress() {
           autoComplete="street-address"
           textContentType="streetAddressLine1"
           maxLength={120}
+          helper={registration.fromId.address ? t('From your ID · keep only the house number and street if you choose the barangay below', 'Gikan sa ID · ibilin lang ang numero sa balay ug dalan kon pilion nimo ang barangay sa ubos') : undefined}
         />
         <BarangayPicker
-          label={t('Barangay', 'Barangay')}
+          label={t('Province, city and barangay', 'Probinsya, siyudad ug barangay')}
           areas={barangays ?? []}
           value={barangayId}
           onChange={(id) => {
@@ -479,14 +497,6 @@ function AccountAddress() {
               : undefined
           }
         />
-        <View style={{ gap: 8 }}>
-          <Txt variant="label">{t('City or municipality', 'Siyudad o lungsod')}</Txt>
-          <View style={styles.input}>
-            <Txt accessibilityLiveRegion="polite" style={{ fontSize: 16, color: selectedBarangay ? c.text : c.muted }}>
-              {selectedBarangay?.city ?? '—'}
-            </Txt>
-          </View>
-        </View>
       </Card>
       {serviceAreaError ? (
         <>
@@ -504,9 +514,13 @@ function AccountAddress() {
 
 export function EntryFlow() {
   const { step } = useLocalSearchParams<{ step: string }>();
-  if (step === 'mobile-number' || step === 'login')
-    return <PhoneEntry key={step} login={step === 'login'} />;
+  // Log in is number + password (or face login); sign-up codes still verify a new number.
+  if (step === 'login') return <LoginScreen />;
+  if (step === 'mobile-number') return <PhoneEntry key={step} login={false} />;
+  if (step === 'valid-id') return <ValidIdStep />;
+  if (step === 'id-camera') return <IdCameraScreen />;
   if (step === 'account-info') return <AccountSetup />;
+  if (step === 'program') return <ProgramStep />;
   if (step === 'account-address') return <AccountAddress />;
   if (step === 'otp') return <OTP />;
   if (step === 'consent') return <Consent />;
@@ -521,8 +535,11 @@ export function EntryFlow() {
 }
 
 function PhoneEntry({ login }: { login: boolean }) {
-  const { phone, setPhone, registration, t } = useDemo();
+  const { phone, setPhone, registration, setRegistration, t } = useDemo();
   const [value, setValue] = useState(phone);
+  const [password, setPassword] = useState(registration.password ?? '');
+  const [confirm, setConfirm] = useState(registration.password ?? '');
+  const [passwordErrors, setPasswordErrors] = useState<{ password?: boolean; confirm?: boolean }>({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const sendingCode = useRef(false);
@@ -536,6 +553,12 @@ function PhoneEntry({ login }: { login: boolean }) {
         ),
       );
       return;
+    }
+    if (!login) {
+      const nextErrors = { password: !meetsPasswordRules(password), confirm: password !== confirm };
+      setPasswordErrors(nextErrors);
+      if (nextErrors.password || nextErrors.confirm) return;
+      setRegistration({ password });
     }
     sendingCode.current = true;
     setLoading(true);
@@ -566,6 +589,10 @@ function PhoneEntry({ login }: { login: boolean }) {
               address: registration.address,
               barangayId: registration.barangayId,
               contactNumber: value,
+              // The shared staff backend receives the ID through the uploaded document instead.
+              ...(!IS_SHARED_BACKEND && registration.idType
+                ? { validIdType: registration.idType, validIdNumber: registration.idNumber || undefined }
+                : {}),
             })
           ).developmentOtp;
         } catch (requestError) {
@@ -622,13 +649,13 @@ function PhoneEntry({ login }: { login: boolean }) {
         </>
       }
     >
-      {!login && <Progress step={3} total={4} />}
+      {!login && <Progress step={5} />}
       <View style={{ alignItems: 'center', gap: 14, paddingTop: login ? 8 : 0 }}>
         <Logo size={login ? 64 : 52} halo={login} />
         <Txt accessibilityRole="header" variant="title" style={{ textAlign: 'center' }}>
           {login
             ? t('Welcome back!', 'Maayong pagbalik!')
-            : t('Enter your mobile number', 'Isulod imong numero sa cellphone')}
+            : t('Your number and password', 'Imong numero ug password')}
         </Txt>
         <Txt style={{ color: c.muted, textAlign: 'center', maxWidth: 320 }}>
           {login
@@ -637,8 +664,8 @@ function PhoneEntry({ login }: { login: boolean }) {
                 'Log in aron makita ang iskedyul o ma-claim ang ayuda.',
               )
             : t(
-                'GarantiyAid uses your mobile number to send your schedule and claim codes.',
-                'Gigamit sa GarantiyAid ang imong numero aron ipadala ang iskedyul ug claim codes.',
+                'You will log in with this number and password. We send a code to confirm the number is yours.',
+                'Kini nga numero ug password ang imong gamiton sa pag-log in. Magpadala mi og code aron makumpirma nga imo ang numero.',
               )}
         </Txt>
       </View>
@@ -651,6 +678,29 @@ function PhoneEntry({ login }: { login: boolean }) {
         }}
         error={error}
       />
+      {!login && (
+        <>
+          <PasswordInput
+            label={t('Create password', 'Paghimo og password')}
+            value={password}
+            onChangeText={(text) => { setPassword(text); setPasswordErrors((previous) => ({ ...previous, password: false })); }}
+            autoComplete="new-password"
+            textContentType="newPassword"
+            maxLength={128}
+            error={passwordErrors.password ? t('Use 8 to 128 characters with at least one letter and one number.', 'Gamita ang 8 hangtod 128 ka karakter nga adunay letra ug numero.') : undefined}
+          />
+          <StrengthMeter value={password} t={t} />
+          <PasswordInput
+            label={t('Confirm password', 'Kumpirmaha ang password')}
+            value={confirm}
+            onChangeText={(text) => { setConfirm(text); setPasswordErrors((previous) => ({ ...previous, confirm: false })); }}
+            autoComplete="new-password"
+            textContentType="newPassword"
+            maxLength={128}
+            error={passwordErrors.confirm ? t('Passwords do not match.', 'Dili parehas ang mga password.') : undefined}
+          />
+        </>
+      )}
       <Notice>
         {t(
           'Your verification code expires after five minutes. Keep it private.',
@@ -682,7 +732,7 @@ function PhoneEntry({ login }: { login: boolean }) {
           </Pressable>
           <View style={[styles.row, { justifyContent: 'center', gap: 2 }]}>
             <Txt variant="small">{t("Don't have an account?", 'Wala pay account?')}</Txt>
-            <TextLink onPress={() => flow('account-info')}>{t('Register', 'Magparehistro')}</TextLink>
+            <TextLink onPress={() => flow('valid-id')}>{t('Register', 'Magparehistro')}</TextLink>
           </View>
         </>
       )}
@@ -691,7 +741,7 @@ function PhoneEntry({ login }: { login: boolean }) {
 }
 
 function OTP() {
-  const { phone, startSession, t } = useDemo();
+  const { phone, startSession, registration, setRegistration, t } = useDemo();
   const { intent, developmentOtp: initialDevelopmentOtp } = useLocalSearchParams<{
     intent: string;
     developmentOtp?: string;
@@ -721,8 +771,28 @@ function OTP() {
             setError('');
             try {
               const result = await verifyOtp(phone, purpose, code);
-              await startSession(result.accessToken, result.beneficiary);
-              intent === 'login' ? router.replace('/(tabs)/home') : flow('consent');
+              if (intent === 'login') {
+                await startSession(result.accessToken, result.beneficiary);
+                // An existing account keeps its own password; never apply a sign-up draft to it.
+                if (registration.password) setRegistration({ password: '' });
+                router.replace('/(tabs)/home');
+              } else {
+                // Save the sign-up details first, so Home opens with the chosen program already shown.
+                let passwordSaved = true;
+                if (registration.password) {
+                  try { await changePassword(result.accessToken, { newPassword: registration.password }); }
+                  catch { passwordSaved = false; }
+                  setRegistration({ password: '' });
+                }
+                const idSaved = await saveRegistrationId(result.accessToken, registration);
+                const programSaved = await saveRegistrationProgram(result.accessToken, registration);
+                await startSession(result.accessToken, result.beneficiary);
+                flow('consent', {
+                  ...(idSaved ? {} : { idUpload: 'failed' }),
+                  ...(programSaved ? {} : { program: 'failed' }),
+                  ...(passwordSaved ? {} : { password: 'failed' }),
+                });
+              }
             } catch (requestError) {
               setShake((value) => value + 1);
               setError(
@@ -742,7 +812,7 @@ function OTP() {
       {intent === 'login' ? (
         <Badge tone="info">{t('Login verification', 'Verification sa login')}</Badge>
       ) : (
-        <Progress step={4} total={4} />
+        <Progress step={6} />
       )}
       <ScreenIntro
         icon={MessageSquareText}
@@ -902,6 +972,16 @@ const s = StyleSheet.create({
     gap: 14,
   },
   rule: { height: 1, backgroundColor: c.outline, flex: 1 },
+  fromId: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: c.primarySoft,
+    borderWidth: 1,
+    borderColor: c.primaryTint,
+  },
   otpWrap: { height: 62, position: 'relative' },
   // Keep the digit row opaque so native input text can't show through it.
   otpBoxes: { flexDirection: 'row', gap: 8, height: 62, backgroundColor: c.surface, zIndex: 1 },

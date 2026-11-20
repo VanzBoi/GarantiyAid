@@ -9,6 +9,8 @@ import androidx.exifinterface.media.ExifInterface
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -24,6 +26,33 @@ class GarantiyAidFaceDetectorModule : Module() {
       .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
       .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
       .setMinFaceSize(0.15f).build())
+  }
+  private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+
+  /** Decodes an app-owned cache image (camera or picker copy) upright. Never reads remote or shared files. */
+  private fun uprightCacheBitmap(uri: String, maxSide: Int = 0): Bitmap {
+    val context = appContext.reactContext ?: throw IllegalStateException("Context unavailable")
+    val parsed = Uri.parse(uri)
+    require(parsed.scheme == "file") { "Expected a camera cache file" }
+    val file = File(parsed.path ?: "").canonicalFile
+    require(file.path.startsWith(context.cacheDir.canonicalPath + File.separator)) { "Not an app cache file" }
+    val options = BitmapFactory.Options()
+    if (maxSide > 0) {
+      val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      BitmapFactory.decodeFile(file.path, bounds)
+      var sample = 1
+      while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+      options.inSampleSize = sample
+    }
+    val original = BitmapFactory.decodeFile(file.path, options) ?: throw IllegalArgumentException("Invalid image")
+    val exif = ExifInterface(file.path)
+    val matrix = Matrix().apply {
+      postRotate(exif.rotationDegrees.toFloat())
+      if (exif.isFlipped) postScale(-1f, 1f)
+    }
+    val bitmap = Bitmap.createBitmap(original, 0, 0, original.width, original.height, matrix, true)
+    if (bitmap !== original) original.recycle()
+    return bitmap
   }
 
   override fun definition() = ModuleDefinition {
@@ -42,21 +71,26 @@ class GarantiyAidFaceDetectorModule : Module() {
       else say()
     }
     Function("stopSpeaking") { speechGeneration++; speech?.stop(); Unit }
+    AsyncFunction("recognizeText") { uri: String, promise: Promise ->
+      val bitmap = uprightCacheBitmap(uri, 2400)
+      textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
+        .addOnSuccessListener { result ->
+          val lines = result.textBlocks.flatMap { block -> block.lines }.map { line ->
+            val box = line.boundingBox
+            mapOf(
+              "text" to line.text,
+              "x" to (box?.left ?: 0).toDouble() / bitmap.width,
+              "y" to (box?.top ?: 0).toDouble() / bitmap.height,
+              "height" to (box?.height() ?: 0).toDouble() / bitmap.height
+            )
+          }
+          promise.resolve(mapOf("text" to result.text, "lines" to lines))
+        }
+        .addOnFailureListener { promise.reject("TEXT_RECOGNITION_FAILED", "Could not read the ID photo", it) }
+        .addOnCompleteListener { bitmap.recycle() }
+    }
     AsyncFunction("analyze") { uri: String, promise: Promise ->
-      val context = appContext.reactContext ?: throw IllegalStateException("Context unavailable")
-      // Read only app-owned camera cache files. Never fetch remote images.
-      val parsed = Uri.parse(uri)
-      require(parsed.scheme == "file") { "Expected a camera cache file" }
-      val file = File(parsed.path ?: "").canonicalFile
-      require(file.path.startsWith(context.cacheDir.canonicalPath + File.separator)) { "Not an app cache file" }
-      val original = BitmapFactory.decodeFile(file.path) ?: throw IllegalArgumentException("Invalid image")
-      val exif = ExifInterface(file.path)
-      val matrix = Matrix().apply {
-        postRotate(exif.rotationDegrees.toFloat())
-        if (exif.isFlipped) postScale(-1f, 1f)
-      }
-      val bitmap = Bitmap.createBitmap(original, 0, 0, original.width, original.height, matrix, true)
-      if (bitmap !== original) original.recycle()
+      val bitmap = uprightCacheBitmap(uri)
       val sample = Bitmap.createScaledBitmap(bitmap, 160, 120, true)
       val pixels = IntArray(160 * 120)
       sample.getPixels(pixels, 0, 160, 0, 0, 160, 120)
@@ -92,6 +126,6 @@ class GarantiyAidFaceDetectorModule : Module() {
         .addOnFailureListener { promise.reject("FACE_ANALYSIS_FAILED", "Could not analyze camera image", it) }
         .addOnCompleteListener { bitmap.recycle() }
     }
-    OnDestroy { detector.close(); speechGeneration++; speech?.stop(); speech?.shutdown() }
+    OnDestroy { detector.close(); textRecognizer.close(); speechGeneration++; speech?.stop(); speech?.shutdown() }
   }
 }

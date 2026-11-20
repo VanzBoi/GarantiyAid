@@ -1,7 +1,7 @@
 import { BiometricSummary } from './biometrics';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, Share, StyleSheet, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -10,6 +10,7 @@ import {
   Bot,
   CalendarDays,
   ChevronRight,
+  CircleAlert,
   CircleCheck,
   Clock3,
   FileText,
@@ -82,6 +83,7 @@ import {
   formatTransactionType,
   transactionSource,
 } from '../format';
+import { enrollmentState, programByCode, programShortName } from '../programs';
 import { colors as c, fonts } from '../theme';
 
 type Translate = (en: string, bs: string) => string;
@@ -168,56 +170,215 @@ export function HomeScreen() {
     refreshOverview,
     wallet,
     notifications,
+    documents,
+    documentsLoading,
+    refreshDocuments,
+    accessToken,
     t,
   } = useDemo();
+  // Load saved documents once so Home can remind people who still need to upload an ID.
+  useEffect(() => {
+    if (accessToken && documents === null && !documentsLoading) void refreshDocuments();
+  }, [accessToken]);
+  // Each time Home is opened again, pick up staff decisions (program approved, schedule published).
+  const lastRefresh = useRef(Date.now());
+  useFocusEffect(useCallback(() => {
+    if (!accessToken || Date.now() - lastRefresh.current < 30_000) return;
+    lastRefresh.current = Date.now();
+    void refreshOverview();
+  }, [accessToken]));
   const schedule = overview?.nextSchedule;
   const unread = notifications.some((notice) => !notice.readAt);
+  const unreadCount = notifications.filter((notice) => !notice.readAt).length;
   const recent = notifications.slice(0, 2);
   const steps = claimProgress(t, beneficiary, overview, wallet);
+  const doneCount = steps.filter((step) => step.state === 'done').length;
+  const nextStep = steps.find((step) => step.state === 'current' || step.state === 'blocked') ?? steps[steps.length - 1];
+  const allDone = doneCount === steps.length;
+  // Approved programs first, then pending, then the rest.
+  const order = { approved: 0, pending: 1, blocked: 2 } as const;
+  const programs = (overview?.enrollments ?? [])
+    .map((enrollment) => {
+      const info = programByCode(enrollment.program.code);
+      const typedIn = !info || info.code === 'OTHER';
+      return {
+        id: enrollment.id,
+        state: enrollmentState(enrollment.status),
+        short: programShortName(enrollment.program.code, enrollment.program.name),
+        // Up to five letters fit the square: "4Ps", "TUPAD", or initials such as "SP" for Social Pension.
+        mark: (() => {
+          const short = programShortName(enrollment.program.code, enrollment.program.name);
+          return short.length <= 5 ? short : short.split(/[\s,-]+/).filter(Boolean).map((word) => word[0]).join('').slice(0, 4).toUpperCase();
+        })(),
+        name: typedIn ? enrollment.program.name : t(info.en, info.bs),
+        about: typedIn ? enrollment.program.description : t(info.descEn, info.descBs),
+      };
+    })
+    .sort((a, b) => order[a.state] - order[b.state]);
+
+  // Things the beneficiary can still do to finish setting up, most important first.
+  const todos: { key: string; title: string; subtitle: string; icon: typeof KeyRound; tone: 'amber' | 'primary' | 'accent'; onPress: () => void }[] = [];
+  if (beneficiary && beneficiary.hasPassword === false) {
+    todos.push({ key: 'password', icon: KeyRound, tone: 'amber', onPress: () => router.push('/account/password'),
+      title: t('Set a password', 'Paghimo og password'),
+      subtitle: t('Log in faster without waiting for a code.', 'Mas paspas nga pag-log in nga dili maghulat og code.') });
+  }
+  if (documents && !documents.some((item) => ['valid_id', 'senior_citizen_id', 'pwd_id'].includes(item.docType))) {
+    todos.push({ key: 'id', icon: FileText, tone: 'accent', onPress: () => go('enrollment-documents'),
+      title: t('Upload your valid ID', 'I-upload ang imong valid ID'),
+      subtitle: t('Staff need it to review your enrollment.', 'Kinahanglan kini sa staff sa pagsusi sa enrollment.') });
+  }
+  if (!faceEnrolled) {
+    todos.push({ key: 'face', icon: ScanFace, tone: 'primary', onPress: () => flow('consent'),
+      title: t('Register your face', 'Irehistro ang imong nawong'),
+      subtitle: t('Optional · faster identity check on claiming day.', 'Opsyonal · mas dali nga pag-verify sa adlaw sa claim.') });
+  }
+
   return (
     <Page tabs header={false}>
-      <GradientCard style={{ gap: 14 }}>
-        <View style={[styles.row, { justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }]}>
+      {/* 1. Who is signed in, alerts, and where their claim stands. */}
+      <GradientCard style={{ gap: 16 }}>
+        <View style={[styles.row, { justifyContent: 'space-between', gap: 8 }]}>
           <Txt variant="caption" style={{ color: '#D9E6FF', letterSpacing: 1.5 }}>GARANTIYAID</Txt>
-          <LanguageToggle light />
+          <View style={[styles.row, { gap: 8 }]}>
+            <LanguageToggle light />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                unread
+                  ? t('Open notifications, unread messages', 'Ablihi ang pahibalo, adunay wala pa mabasa')
+                  : t('Open notifications', 'Ablihi ang pahibalo')
+              }
+              onPress={() => go('notifications')}
+              style={({ pressed }) => [s.bell, pressed && { opacity: 0.8 }]}
+            >
+              <Bell size={22} color={c.onPrimary} />
+              {unread && <View style={s.unreadDot} />}
+            </Pressable>
+          </View>
         </View>
         <View style={[styles.row, { gap: 12 }]}>
-          <ProfileAvatar name={name} size={52} light verified={!!beneficiary?.isVerified} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Txt variant="small" style={{ color: '#D9E6FF' }}>
-              {greeting(t)}
-            </Txt>
-            <Txt variant="heading" numberOfLines={2} style={{ color: c.onPrimary }}>
-              {name}
-            </Txt>
+          <ProfileAvatar name={name} size={56} light verified={!!beneficiary?.isVerified} />
+          <View style={{ flex: 1, gap: 4 }}>
+            <Txt variant="small" style={{ color: '#D9E6FF' }}>{greeting(t)}</Txt>
+            <Txt variant="heading" numberOfLines={2} style={{ color: c.onPrimary, fontSize: 20, lineHeight: 26 }}>{name}</Txt>
+            {programs.length > 0 ? (
+              <View style={s.programChips}>
+                {programs.slice(0, 3).map((program) => {
+                  const Icon = program.state === 'approved' ? CircleCheck : program.state === 'blocked' ? CircleAlert : Clock3;
+                  return (
+                    <Pressable
+                      key={program.id}
+                      accessibilityRole="button"
+                      accessibilityHint={t('Opens your programs', 'Ablihan ang imong mga programa')}
+                      onPress={() => go('programs')}
+                      style={({ pressed }) => [s.programChip, program.state === 'approved' && s.programChipApproved, pressed && { opacity: 0.8 }]}
+                    >
+                      <Icon size={14} color={program.state === 'approved' ? c.navy : c.onPrimary} />
+                      <Txt variant="small" numberOfLines={1} style={[s.programChipText, program.state === 'approved' && { color: c.navy }]}>
+                        {program.state === 'approved'
+                          ? t(`${program.short} beneficiary`, `Benepisyaryo sa ${program.short}`)
+                          : program.state === 'blocked'
+                            ? t(`${program.short} · not approved`, `${program.short} · wala maaprobahi`)
+                            : t(`${program.short} · waiting for approval`, `${program.short} · naghulat sa pag-aprobar`)}
+                      </Txt>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : beneficiary ? (
+              <View style={{ alignSelf: 'flex-start' }}>
+                <Badge tone="light">
+                  {overview ? t('No program recorded yet', 'Wala pay programa nga narekord')
+                    : beneficiary.isVerified ? t('Verified beneficiary', 'Naverify nga benepisyaryo') : t('Verification pending', 'Naghulat sa verification')}
+                </Badge>
+              </View>
+            ) : null}
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              unread
-                ? t('Open notifications, unread messages', 'Ablihi ang pahibalo, adunay wala pa mabasa')
-                : t('Open notifications', 'Ablihi ang pahibalo')
-            }
-            onPress={() => go('notifications')}
-            style={({ pressed }) => [s.bell, pressed && { opacity: 0.8 }]}
-          >
-            <Bell size={22} color={c.onPrimary} />
-            {unread && <View style={s.unreadDot} />}
-          </Pressable>
         </View>
-        <View style={[styles.row, { justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }]}>
-          {beneficiary ? (
-            <Badge tone="light">
-              {beneficiary.isVerified
-                ? t('Verified beneficiary', 'Naverify nga benepisyaryo')
-                : t('Verification pending', 'Naghulat sa verification')}
-            </Badge>
-          ) : (
-            <View />
-          )}
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('Your next step', 'Imong sunod nga lakang')}: ${nextStep.label}. ${nextStep.caption ?? ''}`}
+          onPress={() => go('claim-status')}
+          style={({ pressed }) => [s.nextStep, pressed && { opacity: 0.85 }]}
+        >
+          <View style={[styles.row, { justifyContent: 'space-between' }]}>
+            <Txt variant="caption" style={{ color: '#D9E6FF', letterSpacing: 1 }}>
+              {allDone ? t('CLAIM COMPLETE', 'NAHUMAN ANG CLAIM') : t('YOUR NEXT STEP', 'IMONG SUNOD NGA LAKANG')}
+            </Txt>
+            <Txt variant="small" style={{ color: '#D9E6FF' }}>{t(`${doneCount} of ${steps.length} done`, `${doneCount} sa ${steps.length} nahuman`)}</Txt>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {steps.map((step) => (
+              <View key={step.label} style={[s.heroBar, step.state === 'done' && { backgroundColor: c.onPrimary },
+                step.state === 'current' && { backgroundColor: c.accent }, step.state === 'blocked' && { backgroundColor: '#FFB4BA' }]} />
+            ))}
+          </View>
+          <View style={[styles.row, { gap: 10 }]}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Txt variant="label" style={{ color: c.onPrimary }}>{nextStep.label}</Txt>
+              {nextStep.caption ? <Txt variant="small" numberOfLines={2} style={{ color: '#DFEAFF' }}>{nextStep.caption}</Txt> : null}
+            </View>
+            <ChevronRight size={20} color={c.onPrimary} />
+          </View>
+        </Pressable>
       </GradientCard>
 
+      {/* 2. The programs this person belongs to. */}
+      {programs.length > 0 && (
+        <>
+          <SectionHeader
+            title={programs.length > 1 ? t('My programs', 'Akong mga programa') : t('My program', 'Akong programa')}
+            action={t('Details', 'Detalye')}
+            onAction={() => go('programs')}
+          />
+          <Card style={{ gap: 0, paddingVertical: 4 }}>
+            {programs.map((program, index) => (
+              <Pressable
+                key={program.id}
+                accessibilityRole="button"
+                onPress={() => go('programs')}
+                style={({ pressed }) => [s.programRow, index < programs.length - 1 && s.programRowDivider, pressed && { opacity: 0.85 }]}
+              >
+                <View style={[s.programMark, program.state === 'approved' ? s.programMarkApproved : program.state === 'blocked' ? s.programMarkBlocked : s.programMarkPending]}>
+                  <Txt variant="label" numberOfLines={1} style={{ fontSize: program.mark.length <= 3 ? 15 : program.mark.length <= 4 ? 13 : 11, color: program.state === 'approved' ? c.greenInk : program.state === 'blocked' ? c.error : c.amber }}>
+                    {program.mark}
+                  </Txt>
+                </View>
+                <View style={{ flex: 1, gap: 3 }}>
+                  <Txt variant="label">{program.name}</Txt>
+                  {program.about ? <Txt variant="small" numberOfLines={2}>{program.about}</Txt> : null}
+                  <View style={{ alignSelf: 'flex-start', marginTop: 2 }}>
+                    <Badge tone={program.state === 'approved' ? 'success' : program.state === 'blocked' ? 'error' : 'warning'}>
+                      {program.state === 'approved'
+                        ? t('Approved beneficiary', 'Aprobado nga benepisyaryo')
+                        : program.state === 'blocked'
+                          ? t('Not approved · contact staff', 'Wala maaprobahi · kontaka ang staff')
+                          : t('Staff are checking your membership', 'Gisusi sa staff ang imong pagkamiyembro')}
+                    </Badge>
+                  </View>
+                </View>
+                <ChevronRight size={20} color={c.subtle} />
+              </Pressable>
+            ))}
+          </Card>
+        </>
+      )}
+
+      {/* 3. Unfinished setup. */}
+      {todos.length > 0 && (
+        <>
+          <SectionHeader title={t('To do', 'Buhaton')} />
+          <Card style={{ gap: 0, paddingVertical: 4 }}>
+            {todos.map((todo, index) => (
+              <MenuRow key={todo.key} title={todo.title} subtitle={todo.subtitle} icon={todo.icon} tone={todo.tone}
+                onPress={todo.onPress} last={index === todos.length - 1} />
+            ))}
+          </Card>
+        </>
+      )}
+
+      {/* 3. The claim itself. */}
       <SectionHeader
         title={t('Upcoming claim', 'Umaabot nga claim')}
         action={schedule ? t('Details', 'Detalye') : undefined}
@@ -235,7 +396,7 @@ export function HomeScreen() {
           </Button>
         </>
       ) : schedule ? (
-        <Card style={{ gap: 18, borderColor: c.primaryTint }}>
+        <Card style={{ gap: 16, borderColor: c.primaryTint }}>
           <View style={[styles.row, { alignItems: 'flex-start' }]}>
             <View style={s.dateBlock}>
               <Txt variant="small" style={{ color: c.primary, fontFamily: fonts.semibold, fontSize: 12 }}>
@@ -289,25 +450,25 @@ export function HomeScreen() {
           icon={CalendarDays}
           title={t('No claiming schedule yet', 'Wala pay iskedyul sa claim')}
           body={t(
-            'Your assigned schedule will appear here after your enrollment is approved.',
-            'Makita dinhi ang imong iskedyul human maaprubahan ang enrollment.',
+            'Your next schedule appears here once staff publish it for your approved program.',
+            'Makita dinhi ang imong sunod nga iskedyul kon i-publish na sa staff alang sa imong aprobado nga programa.',
           )}
-        />
-      )}
-      {!overviewError && (
-        <Button variant="ghost" loading={overviewLoading} onPress={() => void refreshOverview()}>
-          {t('Refresh schedule', 'I-refresh ang iskedyul')}
-        </Button>
+        >
+          <Button variant="ghost" loading={overviewLoading} onPress={() => void refreshOverview()}>
+            {t('Refresh schedule', 'I-refresh ang iskedyul')}
+          </Button>
+        </EmptyState>
       )}
 
-      <SectionHeader title={t('Quick actions', 'Dali nga mga aksyon')} />
+      {/* 4. Everything else the beneficiary can open. */}
+      <SectionHeader title={t('Services', 'Mga serbisyo')} />
       <View style={s.grid}>
         <QuickAction style={s.gridItem} label={t('QR claim pass', 'QR claim pass')} icon={QrCode} onPress={() => go('qr-pass')} />
         <QuickAction style={s.gridItem} label={t('Schedule', 'Iskedyul')} icon={CalendarDays} tone="accent" onPress={() => go('schedule')} />
-        <QuickAction style={s.gridItem} label={t('My programs', 'Akong programa')} icon={BookOpen} tone="navy" onPress={() => go('programs')} />
         <QuickAction style={s.gridItem} label={t('Claim status', 'Kahimtang sa claim')} icon={ListChecks} tone="green" onPress={() => go('claim-status')} />
+        <QuickAction style={s.gridItem} label={t('My programs', 'Akong programa')} icon={BookOpen} tone="navy" onPress={() => go('programs')} />
+        <QuickAction style={s.gridItem} label={t('Documents', 'Mga dokumento')} icon={FileText} tone="accent" onPress={() => go('enrollment-documents')} />
         <QuickAction style={s.gridItem} label={t('Scan QR', 'I-scan ang QR')} icon={ScanLine} tone="primary" onPress={() => router.push('/scan')} />
-        <QuickAction style={s.gridItem} label={t('Ask for help', 'Mangayo og tabang')} icon={Bot} tone="amber" onPress={() => router.navigate('/(tabs)/help')} />
       </View>
 
       {wallet ? (
@@ -332,37 +493,11 @@ export function HomeScreen() {
         </Pressable>
       ) : null}
 
-      <SectionHeader
-        title={t('Claim progress', 'Pag-uswag sa claim')}
-        action={t('View status', 'Tan-awa')}
-        onAction={() => go('claim-status')}
-      />
-      <Card>
-        <Timeline steps={steps} />
-      </Card>
-
-      {!faceEnrolled && (
-        <Pressable accessibilityRole="button" onPress={() => flow('consent')}>
-          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 14, borderColor: '#F3E3B5' }}>
-            <IconCircle icon={ScanFace} tone="amber" size={46} square />
-            <View style={{ flex: 1, gap: 2 }}>
-              <Txt variant="label">{t('Optional face verification', 'Opsyonal nga face verification')}</Txt>
-              <Txt variant="small">
-                {t(
-                  'Review consent and arrange enrollment with your facilitator.',
-                  'Basaha ang pagtugot ug pakigsabot sa facilitator alang sa enrollment.',
-                )}
-              </Txt>
-            </View>
-            <ChevronRight size={20} color={c.subtle} />
-          </Card>
-        </Pressable>
-      )}
-
+      {/* 5. Latest messages, then help. */}
       {recent.length > 0 && (
         <>
           <SectionHeader
-            title={t('Recent notifications', 'Bag-ong mga pahibalo')}
+            title={unreadCount ? t(`Notifications · ${unreadCount} new`, `Mga pahibalo · ${unreadCount} bag-o`) : t('Notifications', 'Mga pahibalo')}
             action={t('See all', 'Tan-awa tanan')}
             onAction={() => go('notifications')}
           />
@@ -398,13 +533,6 @@ export function HomeScreen() {
           <ChevronRight size={20} color={c.onPrimary} />
         </GradientCard>
       </Pressable>
-
-      <Notice>
-        {t(
-          'Enrollment, schedule, QR passes, claim status, and wallet history come from your saved account.',
-          'Ang enrollment, iskedyul, QR pass, kahimtang sa claim, ug wallet history gikan sa imong account.',
-        )}
-      </Notice>
     </Page>
   );
 }
@@ -708,6 +836,7 @@ export function ProfileScreen() {
         <MenuRow title={t('Personal information', 'Personal nga impormasyon')} subtitle={t('Names and address', 'Ngalan ug adres')} icon={UserRound} onPress={() => go('edit-profile')} />
         <MenuRow title={t('Email address', 'Email address')} subtitle={beneficiary?.email ?? t('Add and verify', 'Idugang ug i-verify')} icon={Mail} tone="accent" onPress={() => router.push('/account/email')} />
         <MenuRow title={t('Change password', 'Usba ang password')} subtitle={beneficiary?.hasPassword ? t('Sign-in security', 'Seguridad sa pagsulod') : t('Set a password', 'Paghimo og password')} icon={KeyRound} onPress={() => router.push('/account/password')} />
+        <MenuRow title={t('Face login', 'Face login')} subtitle={t('Log in with your face on this phone', 'Log in gamit ang nawong niini nga phone')} icon={ScanFace} tone="accent" onPress={() => router.push('/face-login-settings')} />
         <MenuRow title={t('Notification settings', 'Mga setting sa pahibalo')} icon={Bell} tone="amber" onPress={() => go('notification-settings')} />
         <MenuRow title={t('Security & Privacy', 'Seguridad ug Privacy')} icon={ShieldCheck} tone="green" onPress={() => go('security-privacy')} last />
       </Card>
@@ -749,6 +878,28 @@ export const s = StyleSheet.create({
     fontFamily: fonts.semibold,
     lineHeight: 15,
   },
+  nextStep: {
+    gap: 10,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  programChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
+  programChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.16)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.28)',
+  },
+  programChipApproved: { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF' },
+  programChipText: { color: c.onPrimary, fontFamily: fonts.semibold, fontSize: 12, flexShrink: 1 },
+  programRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
+  programRowDivider: { borderBottomWidth: 1, borderBottomColor: c.outline },
+  programMark: { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  programMarkApproved: { backgroundColor: c.greenSoft },
+  programMarkPending: { backgroundColor: c.amberSoft },
+  programMarkBlocked: { backgroundColor: c.errorSoft },
+  heroBar: { flex: 1, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)' },
   bell: {
     width: 48,
     height: 48,

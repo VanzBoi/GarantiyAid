@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import {
   Badge,
   Button,
@@ -129,6 +129,7 @@ function SavedStatus() {
 /** Register Face: optional consent, in-person capture tips, and progress from saved records. */
 export function BiometricConsentScreen() {
   const { biometrics: data, biometricsLoading, biometricsError, biometricsSaving, refreshBiometrics, giveConsent, t } = useDemo();
+  const { idUpload, password, program } = useLocalSearchParams<{ idUpload?: string; password?: string; program?: string }>();
   const [error, setError] = useState('');
   const pending = useRef(false), mounted = useRef(true);
   useEffect(() => { mounted.current = true; void refreshBiometrics(); return () => { mounted.current = false; }; }, []);
@@ -136,6 +137,15 @@ export function BiometricConsentScreen() {
   return <Page title={t('Face verification consent', 'Pagtugot sa face verification')}>
     <ScreenIntro iconName="scan-face" title={t('Register your face', 'Irehistro ang imong nawong')}
       subtitle={t('Your choice, saved securely. Face enrollment is optional.', 'Imong pagpili, luwas nga gitipigan. Opsyonal ang face enrollment.')} />
+    {idUpload === 'failed' && <Notice tone="warning">
+      {t('Your account is ready, but your ID photo could not be saved. Upload it later in Profile › Enrollment documents.', 'Andam na ang imong account, apan wala matipig ang litrato sa ID. I-upload kini sa ulahi sa Profile › Mga dokumento sa enrollment.')}
+    </Notice>}
+    {program === 'failed' && <Notice tone="warning">
+      {t('Your account is ready, but your program could not be sent. Use Talk to staff so they can add it.', 'Andam na ang imong account, apan wala maipadala ang imong programa. Gamita ang Pakigsulti sa staff aron madugang nila kini.')}
+    </Notice>}
+    {password === 'failed' && <Notice tone="warning">
+      {t('Your account is ready, but your password could not be saved. Set it in Profile › Change password. You can still log in with a code.', 'Andam na ang imong account, apan wala matipig ang password. Paghimo niini sa Profile › Usba ang password. Makalog in gihapon ka gamit ang code.')}
+    </Notice>}
     <Txt>{t('Face enrollment is optional. You can still sign in with your phone number. Staff will explain the identity checks allowed at your claiming event.', 'Opsyonal ang face enrollment. Makasulod gihapon ka gamit ang imong numero. Ipasabot sa staff ang mga identity check nga gitugotan sa imong claiming event.')}</Txt>
     <SectionHeader title={t('Registration progress', 'Pag-uswag sa pagrehistro')} />
     <Card><Timeline steps={enrollmentSteps(data, t)} /></Card>

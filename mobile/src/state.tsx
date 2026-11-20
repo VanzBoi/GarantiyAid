@@ -35,6 +35,18 @@ export type RegistrationInfo = {
   sex: string;
   address: string;
   barangayId: string;
+  idType: string;
+  idNumber: string;
+  /** Chosen at sign-up and saved right after the code is verified; kept in memory only. */
+  password: string;
+  /** DSWD program the person reports at sign-up; staff confirm it. */
+  programCode: string;
+  otherProgramName: string;
+  memberReference: string;
+  /** Photo of the front of the ID, kept on the phone until the account is verified. */
+  idPhoto: { uri: string; name: string; mimeType: string; size?: number } | null;
+  /** Fields filled in from the ID photo, so screens can ask the person to double-check them. */
+  fromId: Partial<Record<'firstName' | 'middleName' | 'lastName' | 'birthDate' | 'address' | 'idNumber', boolean>>;
 };
 const emptyRegistration: RegistrationInfo = {
   firstName: '',
@@ -44,6 +56,14 @@ const emptyRegistration: RegistrationInfo = {
   sex: '',
   address: '',
   barangayId: '',
+  idType: '',
+  idNumber: '',
+  password: '',
+  programCode: '',
+  otherProgramName: '',
+  memberReference: '',
+  idPhoto: null,
+  fromId: {},
 };
 type DemoState = {
   language: Language;

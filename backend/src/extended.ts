@@ -2,18 +2,18 @@
 // and saved assistant conversations. Simulated features never move real money and never
 // compare faces; every response says so with `simulated: true`.
 import type { Express, Request } from "express";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { config } from "./config.ts";
 import { prisma } from "./db.ts";
 import { ApiError } from "./errors.ts";
-import { hashPassword, hashSecret, normalizePhilippinePhone, passwordMatches } from "./security.ts";
+import { hashPassword, hashSecret, normalizePhilippinePhone, passwordMatches, secretMatches } from "./security.ts";
 import { uuid } from "./validation.ts";
 import { FaceChallenges, processRealFace, type FacePurpose } from './face-processor.ts';
 
 type Beneficiary = Awaited<ReturnType<typeof prisma.beneficiary.findUniqueOrThrow>>;
 type Helpers = {
   requireBeneficiary: (req: Request) => Promise<{ session: { sessionId: string }; beneficiary: Beneficiary }>;
-  issueOtp: (beneficiaryId: string, purpose: "reset" | "email", binding?: string) => Promise<string | undefined>;
+  issueOtp: (beneficiaryId: string, purpose: "reset" | "email", binding?: string, req?: Request) => Promise<string | undefined>;
   consumeOtp: (beneficiaryId: string, purpose: "reset" | "email", code: string, binding?: string) => Promise<void>;
   createSession: (beneficiaryId: string) => Promise<{ accessToken: string; tokenType: string; expiresAt: string }>;
   publicBeneficiary: (beneficiary: Beneficiary) => Record<string, unknown>;
@@ -80,7 +80,7 @@ const passwordFailures = new Map<string, { count: number; until: number }>();
 function checkPasswordLimit(key: string) {
   const entry = passwordFailures.get(key);
   if (entry && entry.count >= 5 && entry.until > Date.now()) {
-    throw new ApiError(429, "TOO_MANY_ATTEMPTS", "Too many incorrect passwords. Wait 15 minutes or sign in with a code.");
+    throw new ApiError(429, "TOO_MANY_ATTEMPTS", "Too many incorrect attempts. Wait 15 minutes or reset your password.");
   }
 }
 function recordPasswordFailure(key: string) {
@@ -160,9 +160,13 @@ export function registerExtendedRoutes(app: Express, helpers: Helpers) {
         where: { beneficiaryId: beneficiary.beneficiaryId },
         data: { passwordHash: await hashPassword(newPassword) },
       }),
-      // Other devices must sign in again after a password change.
+      // Other devices must sign in again after a password change, and lose face login.
       prisma.authSession.updateMany({
         where: { beneficiaryId: beneficiary.beneficiaryId, revokedAt: null, sessionId: { not: session.sessionId } },
+        data: { revokedAt: new Date() },
+      }),
+      prisma.faceLoginDevice.updateMany({
+        where: { beneficiaryId: beneficiary.beneficiaryId, revokedAt: null, ...(typeof input.keepFaceLoginDeviceId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.keepFaceLoginDeviceId) ? { deviceId: { not: input.keepFaceLoginDeviceId } } : {}) },
         data: { revokedAt: new Date() },
       }),
     ]);
@@ -174,7 +178,7 @@ export function registerExtendedRoutes(app: Express, helpers: Helpers) {
     const beneficiary = await prisma.beneficiary.findUnique({ where: { contactNumber } });
     if (!beneficiary) throw new ApiError(404, "ACCOUNT_NOT_FOUND", "No account uses this mobile number.");
     if (!beneficiary.isVerified) throw new ApiError(403, "ACCOUNT_NOT_VERIFIED", "Verify this account before resetting a password.");
-    const developmentOtp = await issueOtp(beneficiary.beneficiaryId, "reset");
+    const developmentOtp = await issueOtp(beneficiary.beneficiaryId, "reset", undefined, req);
     res.status(202).json({ data: { expiresInSeconds: 300, ...(developmentOtp ? { developmentOtp } : {}) } });
   });
 
@@ -192,6 +196,11 @@ export function registerExtendedRoutes(app: Express, helpers: Helpers) {
         data: { passwordHash: await hashPassword(newPassword) },
       }),
       prisma.authSession.updateMany({
+        where: { beneficiaryId: beneficiary.beneficiaryId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      // A reset is how a lost phone is locked out, so face login is turned off everywhere.
+      prisma.faceLoginDevice.updateMany({
         where: { beneficiaryId: beneficiary.beneficiaryId, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
@@ -503,6 +512,94 @@ export function registerExtendedRoutes(app: Express, helpers: Helpers) {
   });
   app.post('/beneficiaries/me/biometrics/verification', async (req, res) => {
     res.set('Cache-Control', 'private, no-store').json({ data: await captureFace(req, 'verify') });
+  });
+
+  // ───────────── Face login (only on a phone where it was turned on) ─────────────
+  // The phone keeps a random secret from this server. Face login needs that phone and a face capture,
+  // so knowing someone's mobile number is never enough. With the simulated processor no faces are
+  // compared; the phone's secret is then the only real check, and responses say so.
+  const MAX_FACE_LOGIN_DEVICES = 3;
+  async function enrolledFace(beneficiaryId: string) {
+    const consent = await prisma.biometricConsent.findFirst({
+      where: { beneficiaryId, status: "active", retentionUntil: { gt: new Date() } }, orderBy: { consentedAt: "desc" },
+    });
+    const profile = await prisma.biometricProfile.findUnique({ where: { beneficiaryId } });
+    if (!consent || !profile || profile.status !== "enrolled" || profile.consentId !== consent.consentId) return null;
+    if (config.faceRemote && (profile.simulated || profile.templateHash !== faceSubject(beneficiaryId, consent.consentId))) return null;
+    return { consent, profile };
+  }
+  async function faceLoginDevice(input: Record<string, unknown>) {
+    const deviceId = typeof input.deviceId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.deviceId) ? input.deviceId : "";
+    const secret = typeof input.deviceSecret === "string" ? input.deviceSecret : "";
+    const key = `face:${deviceId}`;
+    checkPasswordLimit(key);
+    const device = deviceId ? await prisma.faceLoginDevice.findUnique({ where: { deviceId }, include: { beneficiary: true } }) : null;
+    if (!device || device.revokedAt || !secret || !secretMatches(secret, device.secretHash, "face-login", config.authPepper)) {
+      if (deviceId) recordPasswordFailure(key);
+      throw new ApiError(401, "FACE_LOGIN_OFF", "Face login is off on this phone. Log in with your password.");
+    }
+    if (!device.beneficiary.isVerified) throw new ApiError(403, "ACCOUNT_NOT_VERIFIED", "Verify this account before signing in.");
+    const face = await enrolledFace(device.beneficiaryId);
+    if (!face) throw new ApiError(409, "FACE_ENROLLMENT_REQUIRED", "Register your face again, then turn face login back on.");
+    return { device, ...face };
+  }
+
+  app.post("/beneficiaries/me/face-login", async (req, res) => {
+    const { beneficiary } = await requireBeneficiary(req);
+    const face = await enrolledFace(beneficiary.beneficiaryId);
+    if (!face) throw new ApiError(409, "FACE_ENROLLMENT_REQUIRED", "Register your face first, then turn on face login.");
+    const deviceSecret = randomBytes(32).toString("base64url");
+    const device = await prisma.$transaction(async (tx) => {
+      const active = await tx.faceLoginDevice.findMany({
+        where: { beneficiaryId: beneficiary.beneficiaryId, revokedAt: null }, orderBy: { createdAt: "asc" }, select: { deviceId: true },
+      });
+      const extra = active.slice(0, Math.max(0, active.length - MAX_FACE_LOGIN_DEVICES + 1)).map((item) => item.deviceId);
+      if (extra.length) await tx.faceLoginDevice.updateMany({ where: { deviceId: { in: extra } }, data: { revokedAt: new Date() } });
+      return tx.faceLoginDevice.create({
+        data: { beneficiaryId: beneficiary.beneficiaryId, secretHash: hashSecret(deviceSecret, "face-login", config.authPepper) },
+      });
+    });
+    res.set("Cache-Control", "private, no-store").status(201).json({
+      data: { deviceId: device.deviceId, deviceSecret, simulated: face.profile.simulated },
+    });
+  });
+
+  app.delete("/beneficiaries/me/face-login/:deviceId", async (req, res) => {
+    const { beneficiary } = await requireBeneficiary(req);
+    const deviceId = uuid(req.params.deviceId, "deviceId");
+    await prisma.faceLoginDevice.updateMany({
+      where: { deviceId, beneficiaryId: beneficiary.beneficiaryId, revokedAt: null }, data: { revokedAt: new Date() },
+    });
+    res.status(204).end();
+  });
+
+  app.post("/auth/face-login/challenge", async (req, res) => {
+    const { device, consent } = await faceLoginDevice(body(req));
+    res.set("Cache-Control", "private, no-store").json({
+      data: faceChallenges.issue(`face-login:${device.deviceId}`, device.beneficiaryId, consent.consentId, "verify"),
+    });
+  });
+
+  app.post("/auth/face-login", async (req, res) => {
+    const input = body(req);
+    const { device, consent, profile } = await faceLoginDevice(input);
+    const digests = frameDigests(input.frames, 3, 3);
+    const challenge = faceChallenges.consume(input.challengeId, `face-login:${device.deviceId}`, device.beneficiaryId, consent.consentId, "verify");
+    if (!simulatedLiveness(digests)) throw new ApiError(422, "CAPTURE_REPEATED", "The capture repeated a frame. Start again.");
+    const real = config.faceRemote
+      ? await processRealFace(config.faceRemote, faceSubject(device.beneficiaryId, consent.consentId), challenge, input.frames as string[])
+      : null;
+    if (real && !real.matched) {
+      recordPasswordFailure(`face:${device.deviceId}`);
+      throw new ApiError(401, "FACE_NOT_MATCHED", "Your face did not match. Try again or log in with your password.");
+    }
+    const now = new Date();
+    await prisma.faceLoginDevice.update({ where: { deviceId: device.deviceId }, data: { lastUsedAt: now } });
+    if (real) await prisma.biometricProfile.update({ where: { profileId: profile.profileId }, data: { lastVerifiedAt: now } });
+    passwordFailures.delete(`face:${device.deviceId}`);
+    res.set("Cache-Control", "private, no-store").json({
+      data: { ...(await createSession(device.beneficiaryId)), beneficiary: publicBeneficiary(device.beneficiary), simulated: !real },
+    });
   });
 
   // ───────────── Assistant conversation history ─────────────

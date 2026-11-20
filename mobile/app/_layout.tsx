@@ -5,12 +5,14 @@ import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
 import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
 import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
-import { ActivityIndicator, View, Platform, StyleSheet } from 'react-native';
+import { View, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DemoProvider, useDemo } from '../src/state';
 import { colors } from '../src/theme';
-import { Button, Logo, Notice, Page, ScreenIntro, useReducedMotion } from '../src/components';
+import { Button, Notice, Page, ScreenIntro, useReducedMotion } from '../src/components';
 import { PushBridge } from '../src/push-bridge';
+import { BrandSplash } from '../src/brand-splash';
+import { useState } from 'react';
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -42,16 +44,15 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
 function RootContent({ fontsReady }: { fontsReady: boolean }) {
   const { accessToken, authError, authLoading, restoreSession, t } = useDemo();
   const reducedMotion = useReducedMotion();
-  if (!fontsReady || authLoading)
-    return (
-      <View style={s.loading} accessibilityLabel="Loading GarantiyAid">
-        <Logo size={56} halo />
-        <ActivityIndicator color={colors.primary} />
-      </View>
-    );
+  const [splashHidden, setSplashHidden] = useState(false);
+  const ready = fontsReady && !authLoading;
+  const splash = splashHidden ? null : (
+    <BrandSplash fontsReady={fontsReady} appReady={ready} onHidden={() => setSplashHidden(true)} />
+  );
+  // One tree for both states, so the splash keeps its animation while the app mounts underneath it.
   return (
-    <View style={s.outer}>
-      <View style={s.app}>
+    <View style={[s.outer, !ready && s.loading]}>
+      {ready && <View style={s.app}>
         <StatusBar style="dark" />
         {authError ? (
           <Page header={false} contentStyle={s.sessionError}>
@@ -87,18 +88,13 @@ function RootContent({ fontsReady }: { fontsReady: boolean }) {
               <Stack.Screen name="[page]" />
             </Stack>
         )}
-      </View>
+      </View>}
+      {splash}
     </View>
   );
 }
 const s = StyleSheet.create({
-  loading: {
-    flex: 1,
-    gap: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
+  loading: { flex: 1, backgroundColor: colors.primary },
   outer: {
     flex: 1,
     alignItems: 'center',

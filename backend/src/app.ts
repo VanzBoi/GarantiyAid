@@ -6,6 +6,10 @@ import { prisma } from "./db.ts";
 import { ApiError } from "./errors.ts";
 import { createOtp, createQrToken, createSessionToken, hashSecret, secretMatches, walletNumberFor } from "./security.ts";
 import { registerExtendedRoutes } from "./extended.ts";
+import { registerProgramRoutes } from "./programs.ts";
+import { registerAssistantRoutes } from "./assistant.ts";
+import { registerStaffRoutes } from "./staff.ts";
+import { checkSmsAllowance, sendOtpSms } from "./sms.ts";
 import { parseOtpRequest, parseOtpVerification, parseProfileUpdate, parseRegistration, uuid } from "./validation.ts";
 import { DOCUMENT_MIME_TYPES, MAX_DOCUMENT_BYTES, documentStoragePath, parseDocumentUpload } from "./documents.ts";
 
@@ -16,10 +20,14 @@ const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 export const app = express();
 
 app.disable("x-powered-by");
+// Railway (and similar hosts) sit behind one proxy; trust it so per-network SMS limits see the real address.
+if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_ENVIRONMENT_NAME || process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 const smallJson = express.json({ limit: "32kb" });
 // Face capture sends a few compressed camera frames; they are hashed and discarded, never stored.
 const faceJson = express.json({ limit: "8mb" });
-app.use((req, res, next) => (req.path.startsWith("/beneficiaries/me/biometrics/") ? faceJson : smallJson)(req, res, next));
+// Face captures (registration, verification and face login) carry several camera photos.
+const takesFacePhotos = (path: string) => path.startsWith("/beneficiaries/me/biometrics/") || path === "/auth/face-login";
+app.use((req, res, next) => (takesFacePhotos(req.path) ? faceJson : smallJson)(req, res, next));
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && config.corsOrigins.has(origin)) {
@@ -44,6 +52,8 @@ function publicBeneficiary(beneficiary: {
   contactNumber: string;
   email?: string | null;
   passwordHash?: string | null;
+  validIdType?: string | null;
+  validIdNumber?: string | null;
   isVerified: boolean;
   status: string;
 }) {
@@ -59,6 +69,8 @@ function publicBeneficiary(beneficiary: {
     contactNumber: beneficiary.contactNumber,
     email: beneficiary.email ?? null,
     hasPassword: !!beneficiary.passwordHash,
+    validIdType: beneficiary.validIdType ?? null,
+    validIdNumber: beneficiary.validIdNumber ?? null,
     isVerified: beneficiary.isVerified,
     status: beneficiary.status,
   };
@@ -69,7 +81,11 @@ export type OtpPurpose = "register" | "login" | "reset" | "email";
 // `binding` ties a code to a value (for example the email address being verified).
 const otpSecret = (code: string, binding?: string) => (binding ? `${binding}:${code}` : code);
 
-async function issueOtp(beneficiaryId: string, purpose: OtpPurpose, binding?: string) {
+/**
+ * Creates a verification code. With SMS_PROVIDER=semaphore the code is texted to the account's number
+ * and never returned; in development it is returned so it can be shown on screen.
+ */
+async function issueOtp(beneficiaryId: string, purpose: OtpPurpose, binding?: string, req?: Request) {
   const recent = await prisma.otpChallenge.findFirst({
     where: {
       beneficiaryId,
@@ -81,7 +97,15 @@ async function issueOtp(beneficiaryId: string, purpose: OtpPurpose, binding?: st
   });
   if (recent) throw new ApiError(429, "OTP_TOO_SOON", "Wait one minute before requesting another code.");
 
-  const code = createOtp();
+  let code = createOtp();
+  const texting = config.sms.provider === "semaphore";
+  if (texting) {
+    // Email codes must reach the inbox being verified, not the phone; there is no email sender yet.
+    if (purpose === "email") throw new ApiError(503, "EMAIL_CODES_UNAVAILABLE", "Email verification is not available yet.");
+    if (req) checkSmsAllowance(req, config.sms);
+    const owner = await prisma.beneficiary.findUniqueOrThrow({ where: { beneficiaryId }, select: { contactNumber: true } });
+    code = await sendOtpSms(config.sms, owner.contactNumber, code);
+  }
   await prisma.$transaction([
     prisma.otpChallenge.updateMany({
       where: { beneficiaryId, purpose, consumedAt: null },
@@ -97,6 +121,7 @@ async function issueOtp(beneficiaryId: string, purpose: OtpPurpose, binding?: st
     }),
   ]);
 
+  if (texting) return undefined;
   if (config.nodeEnv !== "production") console.info(`[development OTP] ${code}`);
   return config.nodeEnv !== "production" ? code : undefined;
 }
@@ -192,7 +217,7 @@ app.post("/auth/register", async (req, res) => {
   if (existing) throw new ApiError(409, "PHONE_ALREADY_REGISTERED", "This mobile number already has an account.");
 
   const beneficiary = await prisma.beneficiary.create({ data: input });
-  const developmentOtp = await issueOtp(beneficiary.beneficiaryId, "register");
+  const developmentOtp = await issueOtp(beneficiary.beneficiaryId, "register", undefined, req);
   res.status(201).json({
     data: {
       beneficiary: publicBeneficiary(beneficiary),
@@ -213,7 +238,7 @@ app.post("/auth/otp/request", async (req, res) => {
     throw new ApiError(409, "ACCOUNT_ALREADY_VERIFIED", "This account is already verified. Sign in instead.");
   }
 
-  const developmentOtp = await issueOtp(beneficiary.beneficiaryId, purpose);
+  const developmentOtp = await issueOtp(beneficiary.beneficiaryId, purpose, undefined, req);
   res.status(202).json({ data: { expiresInSeconds: OTP_LIFETIME_MS / 1000, ...(developmentOtp ? { developmentOtp } : {}) } });
 });
 
@@ -384,11 +409,13 @@ app.get("/beneficiaries/me/overview", async (req, res) => {
         program: {
           id: program.programId,
           code: program.programCode,
-          name: program.programName,
+          // A program typed in by the beneficiary ("Other") shows the name they entered.
+          name: enrollment.requestedProgramName ?? program.programName,
           type: program.programType,
           description: program.description,
-          grantAmount: Number(program.grantAmount),
+          grantAmount: program.grantAmount == null ? null : Number(program.grantAmount),
         },
+        source: enrollment.source,
       })),
       nextSchedule: nextSchedule
         ? {
@@ -405,7 +432,7 @@ app.get("/beneficiaries/me/overview", async (req, res) => {
               id: nextSchedule.distribution.program.programId,
               code: nextSchedule.distribution.program.programCode,
               name: nextSchedule.distribution.program.programName,
-              grantAmount: Number(nextSchedule.distribution.program.grantAmount),
+              grantAmount: nextSchedule.distribution.program.grantAmount == null ? null : Number(nextSchedule.distribution.program.grantAmount),
             },
           }
         : null,
@@ -613,6 +640,9 @@ app.post("/beneficiaries/me/claim-pass", async (req, res) => {
 });
 
 registerExtendedRoutes(app, { requireBeneficiary, issueOtp, consumeOtp, createSession, publicBeneficiary, walletNumberFor });
+registerProgramRoutes(app, { requireBeneficiary });
+registerAssistantRoutes(app, { requireBeneficiary });
+registerStaffRoutes(app);
 
 app.use((_req, _res, next) => next(new ApiError(404, "NOT_FOUND", "Endpoint not found.")));
 

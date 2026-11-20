@@ -1,0 +1,7 @@
+# Keep private and generated files out of `railway up` uploads.
+node_modules/
+.env
+.env.*
+!.env.example
+src/generated/prisma/
+storage/

@@ -4,8 +4,18 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const backendDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const tempDir = resolve(backendDir, '..', '.tmp', 'prisma-dev');
-const localAppData = resolve(backendDir, '..', '.tmp', 'local-app-data');
+try {
+  process.loadEnvFile(resolve(backendDir, '.env'));
+} catch {
+  // .env is optional for this script.
+}
+// LOCAL_DB_DIR moves the database files elsewhere, for example outside a
+// OneDrive-synced folder, where online-only placeholders stop PGlite starting.
+const dbRoot = process.env.LOCAL_DB_DIR
+  ? resolve(process.env.LOCAL_DB_DIR)
+  : resolve(backendDir, '..', '.tmp');
+const tempDir = resolve(dbRoot, 'prisma-dev');
+const localAppData = resolve(dbRoot, 'local-app-data');
 const prismaCli = resolve(backendDir, 'node_modules', 'prisma', 'build', 'index.js');
 const serverName = 'garantiy-aid';
 

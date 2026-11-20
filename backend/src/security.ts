@@ -56,7 +56,7 @@ export function createQrToken(): string {
   return `GAI1.${randomBytes(32).toString("base64url")}`;
 }
 
-type SecretPurpose = "otp" | "session" | "qr" | "face";
+type SecretPurpose = "otp" | "session" | "qr" | "face" | "face-login" | "staff-session";
 
 export function hashSecret(value: string, purpose: SecretPurpose, pepper: string): string {
   return createHmac("sha256", pepper).update(`${purpose}:${value}`).digest("hex");

@@ -72,6 +72,9 @@ export type Beneficiary = {
   email?: string | null;
   /** Present on servers with password sign-in. */
   hasPassword?: boolean;
+  /** ID chosen at registration (standalone API only). */
+  validIdType?: string | null;
+  validIdNumber?: string | null;
   isVerified: boolean;
   status: string;
 };
@@ -288,6 +291,8 @@ export async function registerBeneficiary(input: {
   address: string;
   barangayId: string;
   contactNumber: string;
+  validIdType?: string;
+  validIdNumber?: string;
 }) {
   return (
     await request<{
@@ -527,6 +532,20 @@ const auth = (accessToken: string) => ({ Authorization: `Bearer ${accessToken}` 
 type Session = { accessToken: string; tokenType: 'Bearer'; expiresAt: string; beneficiary: Beneficiary };
 
 /** True when the connected server does not provide an endpoint (for example the shared staff backend). */
+/** Sends the DSWD program chosen at sign-up as a pending request for staff to confirm. */
+export async function requestProgram(accessToken: string, input: { programCode: string; otherProgramName?: string; memberReference?: string }) {
+  return (await request<{ data: { id: string; status: string; programCode: string } }>('/beneficiaries/me/enrollments', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify(input),
+  })).data;
+}
+
+/** Asks the AI assistant. The server adds the person's own records and keeps the AI key private. */
+export async function askAssistant(accessToken: string, messages: { role: 'user' | 'assistant'; text: string }[], language: 'en' | 'bs') {
+  return (await request<{ data: { text: string } }>('/beneficiaries/me/assistant/reply', {
+    method: 'POST', headers: auth(accessToken), body: JSON.stringify({ messages, language }),
+  }, 90_000)).data;
+}
+
 export function isUnavailableOnServer(error: unknown) {
   return error instanceof ApiRequestError && error.status === 404 && (error.code === 'NOT_FOUND' || error.code === 'ROUTE_NOT_FOUND');
 }
@@ -536,7 +555,7 @@ export async function passwordLogin(contactNumber: string, password: string) {
     method: 'POST', body: JSON.stringify({ contactNumber, password }),
   })).data;
 }
-export async function changePassword(accessToken: string, input: { currentPassword?: string; newPassword: string }) {
+export async function changePassword(accessToken: string, input: { currentPassword?: string; newPassword: string; keepFaceLoginDeviceId?: string }) {
   return (await request<{ data: Beneficiary }>('/beneficiaries/me/password', {
     method: 'PUT', headers: auth(accessToken), body: JSON.stringify(input),
   })).data;
@@ -585,6 +604,27 @@ export async function sendSimulatedTransfer(accessToken: string, input: { recipi
 }
 
 export type FaceChallenge = { id: string; nonce: string; purpose: 'enroll' | 'verify'; poses: ('center' | 'blink' | 'left' | 'right')[]; expiresAt: string };
+export type FaceLoginCredential = { deviceId: string; deviceSecret: string };
+export type FaceLoginResult = Session & { simulated: boolean };
+/** Turns on face login for this phone; the returned secret must stay in secure storage on the phone. */
+export async function enableFaceLogin(accessToken: string) {
+  return (await request<{ data: FaceLoginCredential & { simulated: boolean } }>('/beneficiaries/me/face-login', {
+    method: 'POST', headers: auth(accessToken), body: '{}',
+  })).data;
+}
+export async function disableFaceLogin(accessToken: string, deviceId: string) {
+  await request<unknown>(`/beneficiaries/me/face-login/${encodeURIComponent(deviceId)}`, { method: 'DELETE', headers: auth(accessToken) });
+}
+export async function getFaceLoginChallenge(device: FaceLoginCredential) {
+  return (await request<{ data: FaceChallenge }>('/auth/face-login/challenge', {
+    method: 'POST', body: JSON.stringify({ deviceId: device.deviceId, deviceSecret: device.deviceSecret }),
+  })).data;
+}
+export async function faceLogin(device: FaceLoginCredential, frames: string[], challengeId: string) {
+  return (await request<{ data: FaceLoginResult }>('/auth/face-login', {
+    method: 'POST', body: JSON.stringify({ deviceId: device.deviceId, deviceSecret: device.deviceSecret, frames, challengeId }),
+  }, 60_000)).data;
+}
 export async function getFaceChallenge(accessToken: string, purpose: 'enroll' | 'verify') {
   return (await request<{ data: FaceChallenge }>('/beneficiaries/me/biometrics/challenge', {
     method: 'POST', headers: auth(accessToken), body: JSON.stringify({ purpose }),

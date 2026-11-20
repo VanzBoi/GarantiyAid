@@ -171,7 +171,7 @@ Frontmatter lengths use portable CSS `px` notation for the corresponding numeric
 - Pale neutral screens with white outlined containers.
 - Blue task actions and green verification feedback.
 - Compact Inter typography with prominent queue and balance numbers.
-- Rounded controls, a four-step account flow, and four bottom destinations.
+- Rounded controls, a six-step account flow (valid ID first), and four bottom destinations.
 - Visible prototype disclosures beside simulated data and interactions.
 
 ## Colors
@@ -229,7 +229,7 @@ Navigation uses medium Inter (11 native font-size units). Screen-specific overri
 
 Pages are vertically scrolling phone layouts with safe areas. Shared page content uses page padding and section gaps; cards have their own padding and gaps. Common rows use horizontal flex layout, row spacing, and flexible text columns. Shared headers have a minimum height (64 dp) with horizontal padding (16 dp); footer actions use page padding and a smaller top inset (8 dp).
 
-The initial route renders account creation step 1 directly. Registration then moves through personal information, address, mobile number, and OTP verification. Each registration screen shows a four-step progress treatment with a small text row, a 6 dp outlined track, and a blue fill whose percentage follows the active step. Personal and address fields are grouped in white outlined cards with a tighter local gap (14 dp). Radio choices wrap when the phone width requires it.
+Registration starts with a valid ID step (ID type picker, front photo, on-device text reading on Android, ID number), then moves through personal information, address, DSWD program (dropdown with Other), number and password, and OTP verification. Details read from the ID prefill later steps and are marked "From your ID" for review. Each registration screen shows a six-step progress treatment with a small text row, a 6 dp outlined track, and a blue fill whose percentage follows the active step. Personal and address fields are grouped in white outlined cards with a tighter local gap (14 dp). Radio choices wrap when the phone width requires it.
 
 Home's identity row can wrap when space is constrained. The three quick actions share available width. Help uses a scrolling conversation, a separate composer, and wrapping suggested-question buttons at roughly half-row widths (`45%` minimum, `48%` maximum). Chat bubbles cap their width (`88%`). These are observed component behaviors rather than site-wide breakpoints.
 
@@ -281,7 +281,7 @@ Home, Wallet, Help/Tabang, and Profile occupy four equal tab destinations. The a
 
 ### Registration Progress
 
-The account flow uses the same four-step indicator on personal information (25%), address (50%), mobile number (75%), and OTP verification (100%). A translated step label and numeric percentage sit above a thin outlined track. The blue fill clips within the 3 dp rounded track and is proportional to the current step. Login verification uses a text label instead of registration progress.
+The account flow uses the same six-step indicator on valid ID, personal information, address, program, number and password, and OTP verification. A translated step label with the step name and numeric percentage sit above a thin outlined track. The blue fill clips within the 3 dp rounded track and is proportional to the current step. Login verification uses a text label instead of registration progress.
 
 ### Radio Choices
 
@@ -318,7 +318,7 @@ Assistant messages use white outlined bubbles and a small line icon; user messag
 - **Do** keep state labels readable alongside their paired feedback colors.
 - **Do** preserve safe-area spacing, scrollable content, and the four implemented tab destinations.
 - **Do** keep prototype disclosures visible wherever the interface presents simulated claims, messages, or wallet data.
-- **Do** keep registration at four visible steps and group personal and address fields in the established outlined cards.
+- **Do** keep registration at six visible steps (valid ID, personal, address, program, number and password, code) and group fields in the established outlined cards.
 - **Do** validate names and places with Unicode-aware letter rules and derive visible errors from boolean state so language changes update them.
 
 ### Don't:
